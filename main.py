@@ -18,7 +18,7 @@ def get_strava_tokens():
         f"response_type=code&"
         f"redirect_uri=http://localhost/callback&"
         f"approval_prompt=force&"
-        f"scope=activity:read_all"
+        f"scope=activity:read_all,activity:write"
     )
 
     print("\n=== FASE 1: RICHIESTA ACCESSO ===")
