@@ -1,8 +1,13 @@
 import requests
+import os
+from dotenv import load_dotenv
+
+# 1. Carica le chiavi in modo sicuro dal file .env
+load_dotenv()
 
 # 1. CONFIGURAZIONE
 # Assicurati che il token abbia il permesso 'profile:read_all'
-ACCESS_TOKEN = "58f87d83e61572f533318eaa7b5f538d6bf03f3b"
+ACCESS_TOKEN = os.getenv('STRAVA_ACCESS_TOKEN')
 
 def elenca_anagrafica_scarpe():
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}

@@ -1,9 +1,14 @@
 import requests
 import pandas as pd
 import datetime
+import os
+from dotenv import load_dotenv
+
+# 1. Carica le chiavi in modo sicuro dal file .env
+load_dotenv()
 
 # INCOLLA QUI IL TUO ACCESS TOKEN (con permessi activity:read_all e profile:read_all)
-ACCESS_TOKEN = "7f08a68bc00e19f69a8bc7269cf2e291b3993a83"
+ACCESS_TOKEN = os.getenv('STRAVA_ACCESS_TOKEN')
 
 def genera_report_2026():
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}

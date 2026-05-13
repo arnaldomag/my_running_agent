@@ -1,9 +1,14 @@
 import requests
 import datetime
 import time
+import os
+from dotenv import load_dotenv
+
+# 1. Carica le chiavi in modo sicuro dal file .env
+load_dotenv()
 
 # 1. INCOLLA IL TUO TOKEN (deve avere permesso activity:write)
-ACCESS_TOKEN = "7f08a68bc00e19f69a8bc7269cf2e291b3993a83"
+ACCESS_TOKEN = os.getenv('STRAVA_ACCESS_TOKEN')
 
 def reset_scarpe_2026():
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}

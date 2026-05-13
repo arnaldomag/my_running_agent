@@ -1,6 +1,11 @@
 import requests
+import os
+from dotenv import load_dotenv
 
-ACCESS_TOKEN = "31fc3a115b0dbb64f7ff5c009928242d1daecdf3"
+# 1. Carica le chiavi in modo sicuro dal file .env
+load_dotenv()
+
+ACCESS_TOKEN = os.getenv('STRAVA_ACCESS_TOKEN')
 
 def trova_gear_id():
     url = "https://www.strava.com/api/v3/athlete"

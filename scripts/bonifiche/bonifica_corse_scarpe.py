@@ -3,9 +3,13 @@ import datetime
 import time
 import json
 import os
+from dotenv import load_dotenv
+
+# 1. Carica le chiavi in modo sicuro dal file .env
+load_dotenv()
 
 # 1. CONFIGURAZIONE
-ACCESS_TOKEN = "58f87d83e61572f533318eaa7b5f538d6bf03f3b"
+ACCESS_TOKEN = os.getenv('STRAVA_ACCESS_TOKEN')
 FILE_CONFIG = os.path.join("bonifiche", "bonifiche_2026.json")
 
 def carica_dizionario_json(nome_file):
