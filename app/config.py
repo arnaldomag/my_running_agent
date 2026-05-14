@@ -1,6 +1,8 @@
 import os
 import google.auth
 from google.cloud import secretmanager
+from dotenv import load_dotenv
+load_dotenv() # Questo carica il file .env nelle variabili d'ambiente
 
 class Config:
     def __init__(self):
