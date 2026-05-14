@@ -3,7 +3,7 @@ from google.cloud import secretmanager
 from google.cloud import firestore
 
 # Sostituisci con l'ID del tuo progetto creato prima
-PROJECT_ID = "IL-TUO-PROJECT-ID" 
+PROJECT_ID = "my-running-agent" 
 
 def test_connection():
     print(f"--- Test Connessione Google Cloud per {PROJECT_ID} ---")
@@ -17,7 +17,7 @@ def test_connection():
         print("✅ Secret Manager: Connessione riuscita! Token recuperato.")
         
         # 2. Test Firestore
-        db = firestore.Client(project=PROJECT_ID)
+        db = firestore.Client(project=PROJECT_ID, database="my-running-agent")
         # Proviamo a leggere la collezione 'activities' creata prima
         docs = db.collection('activities').limit(1).get()
         print("✅ Firestore: Connessione riuscita!")
