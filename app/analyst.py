@@ -90,5 +90,88 @@ class RunningAnalyst:
             return response.text
         except Exception as e:
             return f"Errore durante la generazione del report settimanale: {e}"
+        
+    def analyze_single_run(self, dati_corsa):
+        """Genera un'analisi profonda di una singola corsa confrontando target e realtà"""
+        
+        if not dati_corsa:
+            return "Nessun dato disponibile per questa attività."
+
+        # 1. Preparazione dei Lap (Convertiamo i m/s in min/km se disponibili)
+        laps_info = "Dati lap non disponibili."
+        if dati_corsa.get('laps'):
+            laps_str_list = []
+            # Prendiamo i primi 15 lap per non sovraccaricare il prompt
+            for i, lap in enumerate(dati_corsa['laps'][:15]):
+                passo_lap_ms = lap.get('average_speed', 0)
+                if passo_lap_ms > 0:
+                    # Formula di conversione da m/s a min/km
+                    pace_min_km = 16.6667 / passo_lap_ms
+                    mins = int(pace_min_km)
+                    secs = int((pace_min_km - mins) * 60)
+                    pace_str = f"{mins}:{secs:02d}"
+                else:
+                    pace_str = "N/D"
+                laps_str_list.append(f"Km {i+1}: {pace_str}")
+            laps_info = " | ".join(laps_str_list)
+
+        # 2. Conversione Passo Medio Totale (da m/s a min/km)
+        passo_medio_ms = dati_corsa.get('passo_medio', 0)
+        if passo_medio_ms > 0:
+            pace_min_km = 16.6667 / passo_medio_ms
+            mins = int(pace_min_km)
+            secs = int((pace_min_km - mins) * 60)
+            passo_medio_str = f"{mins}:{secs:02d} min/km"
+        else:
+            passo_medio_str = "N/D"
+
+        # 3. Gestione Note Private vuote
+        note = dati_corsa.get('note_private', '').strip()
+        if not note:
+            note = "Nessun obiettivo o struttura specificata nelle note private."
+
+        # 4. Prompt Ingegnerizzato per l'Analisi Dettagliata
+        prompt = f"""
+        Agisci come il mio coach di corsa e analista dati sportivo.
+        Valuta questa singola sessione confrontando le mie note private (l'obiettivo dell'allenamento) con i dati reali registrati.
+        
+        DATI DELLA CORSA A CONSUNTIVO:
+        - Nome: {dati_corsa['nome']}
+        - Distanza: {dati_corsa['distanza']:.2f} km
+        - Tempo in movimento: {dati_corsa['tempo_movimento']:.1f} min
+        - Passo Medio: {passo_medio_str}
+        - Battiti Medi: {dati_corsa['bpm_medi']} bpm
+        - Dislivello: {dati_corsa['dislivello']} m
+        - Scarpe utilizzate: {dati_corsa['scarpe']}
+        
+        DATI A PREVENTIVO (STRUTTURA/OBIETTIVO):
+        "{note}"
+        
+        ANDAMENTO DEL PASSO PER KM:
+        {laps_info}
+        
+        COMPITI ANALITICI:
+        1. Esegui un'analisi degli scostamenti: ho rispettato quanto scritto nelle note private? (Es. se l'obiettivo era 1 minuto veloce / 1 lento, i lap riflettono variazioni di ritmo coerenti?).
+        2. Valuta il dispendio energetico (passo e BPM) e controlla se la scarpa registrata è adeguata al tipo di lavoro svolto, tenendo conto delle dinamiche per preparare una mezza maratona.
+        3. Scrivi un responso tecnico e netto (max 150 parole)
+        4. Cerca elementi in cui non sono andato bene, sii molto onesto e duro se serve e cerca di darmi consigli reali e pratici su come poter migliorare (max 150 parole).
+        
+        REGOLE DI FORMATTAZIONE PER TELEGRAM:
+        - Formatta in HTML (usa SOLO i tag <b> per grassetto e <i> per corsivo).
+        - NON usare Markdown (no **, no #).
+        - NON inserire tag di blocco come <html>, <body>, <p>, <ul> o <li>.
+        - Usa il trattino testuale (-) per eventuali elenchi.
+        - NON inserire blocchi di codice testuali (no ```html).
+        - Restituisci esclusivamente il testo formattato pronto per l'invio.
+        """
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            return f"Errore durante l'analisi della singola corsa: {e}"
 
 analyst = RunningAnalyst()

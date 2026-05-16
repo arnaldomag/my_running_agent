@@ -76,4 +76,42 @@ class StravaClient:
                 
         return lista_corse, round(km_totali, 2)
 
+    def fetch_activity_details(self, activity_id):
+        """
+        Scarica il dettaglio completo di una singola attività.
+        È l'unico endpoint che restituisce il campo 'private_note'.
+        """
+        token = self.get_access_token()
+        headers = {'Authorization': f"Bearer {token}"}
+        
+        # Endpoint specifico per il dettaglio
+        url = f"{self.base_url}/activities/{activity_id}"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            activity_details = response.json()
+            
+            # Estraiamo i campi chiave per l'analisi dell'agente
+            # Se un campo è mancante, usiamo dei valori di default sicuri
+            data_pulita = {
+                "id": activity_details.get("id"),
+                "nome": activity_details.get("name"),
+                "tipo": activity_details.get("type"),
+                "distanza": activity_details.get("distance", 0) / 1000, # in km
+                "tempo_movimento": activity_details.get("moving_time", 0) / 60, # in minuti
+                "passo_medio": activity_details.get("average_speed", 0), # m/s
+                "bpm_medi": activity_details.get("average_heartrate", "N/D"),
+                "dislivello": activity_details.get("total_elevation_gain", 0),
+                "scarpe": activity_details.get("gear", {}).get("name", "Non specificate"),
+                "note_private": activity_details.get("private_note", ""), # Qui c'è la struttura dell'allenamento
+                "laps": activity_details.get("laps", []) # Utile per vedere i ritmi ogni km
+            }
+            
+            return data_pulita
+            
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Errore nel recupero del dettaglio attività {activity_id}: {e}")
+            return None
+
 strava_client = StravaClient()

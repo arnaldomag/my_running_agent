@@ -75,14 +75,30 @@ def main():
         print(feedback_settimanale)
         print("------------------------------------")
 
-        # Invio a Telegram
-        print("📱 Inviando notifica su Telegram...")
+        # --- INIZIO BLOCCO INVIO TELEGRAM CON BOTTONI ---
+        print("📱 Inviando notifica su Telegram con bottoni interattivi...")
         
-        # Titolo in grassetto HTML
         messaggio_telegram = f"📅 <b>Report Settimanale MyRunningAgent</b>\n\n{feedback_settimanale}"
         
-        if notifier.send_message(messaggio_telegram):
-            print("✅ Notifica inviata con successo sul tuo smartphone!")
+        # 1. Creiamo la tastiera dinamica basata sulle corse della settimana
+        bottoni = []
+        if lista_corse:
+            for corsa in lista_corse:
+                # Creiamo una riga con un singolo bottone per ogni corsa
+                # Usiamo l'ID reale della corsa per il callback_data
+                bottone = {
+                    "text": f"📊 Analizza {corsa['nome']}", 
+                    "callback_data": f"analyze_{corsa['id']}"
+                }
+                bottoni.append([bottone]) # Le parentesi quadre extra mettono un bottone per riga
+        
+        # 2. Strutturiamo il dizionario come lo vuole Telegram
+        tastiera_inline = {"inline_keyboard": bottoni} if bottoni else None
+        
+        # 3. Spediamo messaggio + tastiera
+        if notifier.send_message(messaggio_telegram, reply_markup=tastiera_inline):
+            print("✅ Notifica con bottoni inviata con successo sul tuo smartphone!")
+        # --- FINE BLOCCO INVIO TELEGRAM ---
 
         print(f"🚀 Avvio in modalità {'CLOUD' if getattr(config, 'is_cloud', False) else 'LOCALE'}")
 
