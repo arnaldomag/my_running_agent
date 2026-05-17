@@ -15,5 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia tutto il resto del codice
 COPY . .
 
-# Comando per avviare l'agente
-CMD ["python", "main.py"]
+# Espone la porta usata nativamente da Cloud Run
+EXPOSE 8080
+
+# Comando per avviare il server web con Gunicorn (invece dello script singolo)
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "webhook:app"]

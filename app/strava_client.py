@@ -105,7 +105,7 @@ class StravaClient:
                 "dislivello": activity_details.get("total_elevation_gain", 0),
                 "scarpe": activity_details.get("gear", {}).get("name", "Non specificate"),
                 "note_private": activity_details.get("private_note", ""), # Qui c'è la struttura dell'allenamento
-                "laps": activity_details.get("laps", []) # Utile per vedere i ritmi ogni km
+                "laps": activity_details.get("laps", []) # Utile per vedere i ritmi ogni lap
             }
             
             return data_pulita
