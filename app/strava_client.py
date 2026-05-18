@@ -96,12 +96,12 @@ class StravaClient:
             runs = [act for act in activities if act.get('type') == 'Run']
             
             if not runs:
-                return [], 0, None, None  # Nessuna corsa trovata in tutto lo storico recente
+                return [], 0, None, None  # Nessuna corsa trovata nello storico recente
                 
             # La corsa in indice 0 è la più recente in assoluto
             ultima_corsa = runs[0]
             
-            # Gestione della data (sostituiamo la Z con il formato fuso orario UTC per compatibilità)
+            # Gestione della data
             data_str = ultima_corsa['start_date_local'].replace('Z', '+00:00')
             run_date = datetime.fromisoformat(data_str)
             
@@ -120,11 +120,13 @@ class StravaClient:
                     settimana_attiva.append({
                         "id": run.get("id"),
                         "nome": run.get("name"),
-                        "distanza": run.get("distance", 0) / 1000
+                        "distanza": run.get("distance", 0) / 1000,
+                        "data": r_date.strftime("%d/%m/%Y"),  # 👈 ECCO LA CHIAVE RIPRISTINATA!
+                        "start_date": run.get("start_date_local") # Per massima compatibilità interna
                     })
                     km_totali += run.get("distance", 0) / 1000
                     
-            # Le API restituiscono in ordine decrescente, le giriamo in ordine cronologico corretto
+            # Giriamo in ordine cronologico corretto
             settimana_attiva.reverse()
             
             return settimana_attiva, km_totali, start_of_week, end_of_week
