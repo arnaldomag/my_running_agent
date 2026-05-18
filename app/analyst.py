@@ -205,7 +205,10 @@ class RunningAnalyst:
         - Restituisci esclusivamente il testo formattato pronto per l'invio.
         """
         try:
-            risposta = self.model.generate_content(prompt)
+            risposta = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt
+            )
             return risposta.text
         except Exception as e:
             print(f"Errore Gemini durante analisi scarpa: {e}")
