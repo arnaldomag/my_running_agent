@@ -65,60 +65,44 @@ def main():
         print("\n📊 Recupero dati della settimana in corso da Strava...")
         lista_corse, km_totali = strava_client.fetch_weekly_runs()
 
-        # --- NUOVO BLOCCO LOGICA FALLBACK ---
-        prefisso_messaggio = ""
-
-        # Se la settimana in corso è a zero, attiviamo il recupero retroattivo
+        # --- SE LA SETTIMANA È VUOTA: PROPONI IL BIVIO INTERATTIVO ---
         if not lista_corse:
-            print("⚠️ Nessun allenamento trovato questa settimana. Ricerca dell'ultima settimana attiva in corso...")
-            lista_corse, km_totali, start_date, end_date = strava_client.fetch_last_active_week()
+            print("⚠️ Nessun allenamento trovato questa settimana. Invio proposta di fallback su Telegram...")
             
-            if not lista_corse:
-                print("❌ Nessuna corsa trovata nello storico recente. Lo script termina qui.")
-                notifier.send_message("💤 Nessuna corsa rilevata nelle ultime settimane. Riposati o torna in pista!")
-                return
-                
-            # Formattiamo le date per far capire a che periodo ci stiamo riferendo
-            data_inizio = start_date.strftime("%d/%m")
-            data_fine = end_date.strftime("%d/%m")
-            prefisso_messaggio = f"⚠️ <i>Nessuna corsa questa settimana. Ti mostro l'analisi del tuo ultimo carico ({data_inizio} - {data_fine}):</i>\n\n"
-        # --- FINE BLOCCO LOGICA FALLBACK ---
+            messaggio_domanda = (
+                "📅 <b>Report Settimanale MyRunningAgent</b>\n\n"
+                "💤 Non ho trovato allenamenti registrati per questa settimana.\n\n"
+                "Vuoi analizzare i dati dell'<b>ultima settimana attiva</b> disponibile?"
+            )
+            
+            # Creiamo i due bottoni di scelta
+            bottoni_scelta = [[
+                {"text": "✅ Sì, grazie", "callback_data": "fallback_last_week_show"},
+                {"text": "❌ No, va bene così", "callback_data": "fallback_last_week_ignore"}
+            ]]
+            
+            tastiera_inline = {"inline_keyboard": bottoni_scelta}
+            
+            if notifier.send_message(messaggio_domanda, reply_markup=tastiera_inline):
+                print("✅ Domanda di fallback inviata su Telegram.")
+            return # Interrompiamo l'esecuzione del main qui
+        # --- FINE BLOCCO BIVIO ---
 
+        # Questo codice viene eseguito SOLO se ci sono corse nella settimana corrente
         print("🤖 L'Agente IA sta generando il report settimanale...")
         feedback_raw = analyst.analyze_weekly_summary(lista_corse, km_totali)
-
-        # PULIZIA DI SICUREZZA: Rimuove eventuali blocchi di codice che Gemini potrebbe aggiungere
         feedback_settimanale = feedback_raw.replace("```html", "").replace("```", "").strip()
 
-        print("\n--- REPORT SETTIMANALE DEL COACH ---")
-        print(feedback_settimanale)
-        print("------------------------------------")
-
-        # --- INIZIO BLOCCO INVIO TELEGRAM CON BOTTONI ---
-        print("📱 Inviando notifica su Telegram con bottoni interattivi...")
+        print("\n📱 Inviando notifica standard con bottoni...")
+        messaggio_telegram = f"📅 <b>Report Settimanale MyRunningAgent</b>\n\n{feedback_settimanale}"
         
-        # Inseriamo il prefisso testuale generato nel blocco fallback
-        messaggio_telegram = f"📅 <b>Report Settimanale MyRunningAgent</b>\n\n{prefisso_messaggio}{feedback_settimanale}"
-        
-        # 1. Creiamo la tastiera dinamica basata sulle corse della settimana
         bottoni = []
-        if lista_corse:
-            for corsa in lista_corse:
-                # Creiamo una riga con un singolo bottone per ogni corsa
-                # Usiamo l'ID reale della corsa per il callback_data
-                bottone = {
-                    "text": f"📊 Analizza {corsa['nome']}", 
-                    "callback_data": f"analyze_{corsa['id']}"
-                }
-                bottoni.append([bottone]) # Le parentesi quadre extra mettono un bottone per riga
+        for corsa in lista_corse:
+            bottone = {"text": f"📊 Analizza {corsa['nome']}", "callback_data": f"analyze_{corsa['id']}"}
+            bottoni.append([bottone])
         
-        # 2. Strutturiamo il dizionario come lo vuole Telegram
         tastiera_inline = {"inline_keyboard": bottoni} if bottoni else None
-        
-        # 3. Spediamo messaggio + tastiera
-        if notifier.send_message(messaggio_telegram, reply_markup=tastiera_inline):
-            print("✅ Notifica con bottoni inviata con successo sul tuo smartphone!")
-        # --- FINE BLOCCO INVIO TELEGRAM ---
+        notifier.send_message(messaggio_telegram, reply_markup=tastiera_inline)
 
         print(f"🚀 Avvio in modalità {'CLOUD' if getattr(config, 'is_cloud', False) else 'LOCALE'}")
 
