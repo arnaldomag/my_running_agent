@@ -65,6 +65,25 @@ def main():
         print("\n📊 Recupero dati della settimana in corso da Strava...")
         lista_corse, km_totali = strava_client.fetch_weekly_runs()
 
+        # --- NUOVO BLOCCO LOGICA FALLBACK ---
+        prefisso_messaggio = ""
+
+        # Se la settimana in corso è a zero, attiviamo il recupero retroattivo
+        if not lista_corse:
+            print("⚠️ Nessun allenamento trovato questa settimana. Ricerca dell'ultima settimana attiva in corso...")
+            lista_corse, km_totali, start_date, end_date = strava_client.fetch_last_active_week()
+            
+            if not lista_corse:
+                print("❌ Nessuna corsa trovata nello storico recente. Lo script termina qui.")
+                notifier.send_message("💤 Nessuna corsa rilevata nelle ultime settimane. Riposati o torna in pista!")
+                return
+                
+            # Formattiamo le date per far capire a che periodo ci stiamo riferendo
+            data_inizio = start_date.strftime("%d/%m")
+            data_fine = end_date.strftime("%d/%m")
+            prefisso_messaggio = f"⚠️ <i>Nessuna corsa questa settimana. Ti mostro l'analisi del tuo ultimo carico ({data_inizio} - {data_fine}):</i>\n\n"
+        # --- FINE BLOCCO LOGICA FALLBACK ---
+
         print("🤖 L'Agente IA sta generando il report settimanale...")
         feedback_raw = analyst.analyze_weekly_summary(lista_corse, km_totali)
 
@@ -78,7 +97,8 @@ def main():
         # --- INIZIO BLOCCO INVIO TELEGRAM CON BOTTONI ---
         print("📱 Inviando notifica su Telegram con bottoni interattivi...")
         
-        messaggio_telegram = f"📅 <b>Report Settimanale MyRunningAgent</b>\n\n{feedback_settimanale}"
+        # Inseriamo il prefisso testuale generato nel blocco fallback
+        messaggio_telegram = f"📅 <b>Report Settimanale MyRunningAgent</b>\n\n{prefisso_messaggio}{feedback_settimanale}"
         
         # 1. Creiamo la tastiera dinamica basata sulle corse della settimana
         bottoni = []

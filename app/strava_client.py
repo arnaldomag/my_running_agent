@@ -76,6 +76,63 @@ class StravaClient:
                 
         return lista_corse, round(km_totali, 2)
 
+    def fetch_last_active_week(self):
+        """
+        Scarica le attività recenti, individua l'ultima corsa effettuata
+        e restituisce tutti gli allenamenti di quella specifica settimana.
+        """
+        token = self.get_access_token()
+        headers = {'Authorization': f"Bearer {token}"}
+        
+        # Chiediamo le ultime 30 attività per essere sicuri di andare abbastanza indietro
+        url = f"{self.base_url}/athlete/activities?per_page=30"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            activities = response.json()
+            
+            # Filtriamo per tenere solo le corse
+            runs = [act for act in activities if act.get('type') == 'Run']
+            
+            if not runs:
+                return [], 0, None, None  # Nessuna corsa trovata in tutto lo storico recente
+                
+            # La corsa in indice 0 è la più recente in assoluto
+            ultima_corsa = runs[0]
+            
+            # Gestione della data (sostituiamo la Z con il formato fuso orario UTC per compatibilità)
+            data_str = ultima_corsa['start_date_local'].replace('Z', '+00:00')
+            run_date = datetime.fromisoformat(data_str)
+            
+            # Calcoliamo i confini (Lunedì e Domenica) della settimana a cui appartiene questa corsa
+            start_of_week = run_date - timedelta(days=run_date.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            
+            # Ora raccogliamo TUTTE le corse di QUELLA settimana specifica
+            settimana_attiva = []
+            km_totali = 0
+            
+            for run in runs:
+                r_date = datetime.fromisoformat(run['start_date_local'].replace('Z', '+00:00'))
+                if start_of_week <= r_date <= end_of_week:
+                    settimana_attiva.append({
+                        "id": run.get("id"),
+                        "nome": run.get("name"),
+                        "distanza": run.get("distance", 0) / 1000
+                    })
+                    km_totali += run.get("distance", 0) / 1000
+                    
+            # Le API restituiscono in ordine decrescente, le giriamo in ordine cronologico corretto
+            settimana_attiva.reverse()
+            
+            return settimana_attiva, km_totali, start_of_week, end_of_week
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Errore nel recupero della settimana attiva retroattiva: {e}")
+            return [], 0, None, None
+
     def fetch_activity_details(self, activity_id):
         """
         Scarica il dettaglio completo di una singola attività.
