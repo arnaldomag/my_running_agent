@@ -174,4 +174,41 @@ class RunningAnalyst:
         except Exception as e:
             return f"Errore durante l'analisi della singola corsa: {e}"
 
+    def analyze_shoe(self, gear_details):
+        """Analizza l'usura e le caratteristiche tecniche della scarpa"""
+        nome = gear_details.get('name', 'Scarpa')
+        brand = gear_details.get('brand_name', 'Sconosciuto')
+        model_name = gear_details.get('model_name', 'Sconosciuto')
+        km_attuali = gear_details.get('distance', 0) / 1000
+
+        prompt = f"""
+        Analizza tecnicamente la seguente scarpa da running e il suo stato di usura:
+        - Nome in Strava: {nome}
+        - Marca: {brand}
+        - Modello: {model_name}
+        - Chilometri attuali: {km_attuali:.2f} km
+
+        L'atleta la utilizza principalmente per allenamenti e gare su distanze di 10km e mezze maratone (21km).
+        
+        Struttura la risposta in modo chiaro:
+        1. Fai un breve focus tecnico sul modello (es. tipo di schiuma PEBA/EVA, drop, presenza di piastre, reattività).
+        2. Indica qual è la durata media o "lifespan" (in km) per questa tipologia esatta di schiuma e modello.
+        3. Confronta i km attuali con la durata media, indicando se la scarpa è ancora nel suo "sweet spot", se sta perdendo ammortizzazione o se il rischio infortuni inizia ad alzarsi.
+        4. Dai un verdetto finale: è ora di iniziare a cercare la sostituta?
+
+        REGOLE DI FORMATTAZIONE PER TELEGRAM:
+        - Formatta in HTML (usa SOLO i tag <b> per grassetto e <i> per corsivo).
+        - NON usare Markdown (no **, no #).
+        - NON inserire tag di blocco come <html>, <body>, <p>, <ul> o <li>.
+        - Usa il trattino testuale (-) per eventuali elenchi.
+        - NON inserire blocchi di codice testuali (no ```html).
+        - Restituisci esclusivamente il testo formattato pronto per l'invio.
+        """
+        try:
+            risposta = self.model.generate_content(prompt)
+            return risposta.text
+        except Exception as e:
+            print(f"Errore Gemini durante analisi scarpa: {e}")
+            return f"❌ Impossibile generare l'analisi per questa scarpa: {e}"
+
 analyst = RunningAnalyst()

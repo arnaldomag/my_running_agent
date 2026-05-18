@@ -135,6 +135,36 @@ class StravaClient:
             print(f"❌ Errore nel recupero della settimana attiva retroattiva: {e}")
             return [], 0, None, None
 
+    def fetch_athlete_shoes(self):
+        """Recupera la lista delle scarpe registrate sul profilo atleta"""
+        token = self.get_access_token()
+        headers = {'Authorization': f"Bearer {token}"}
+        url = f"{self.base_url}/athlete"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            athlete_data = response.json()
+            # Strava restituisce un array 'shoes' con le scarpe
+            return athlete_data.get('shoes', [])
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Errore nel recupero della scarpiera: {e}")
+            return []
+
+    def fetch_gear_details(self, gear_id):
+        """Recupera i dettagli tecnici e i km esatti di una singola scarpa"""
+        token = self.get_access_token()
+        headers = {'Authorization': f"Bearer {token}"}
+        url = f"{self.base_url}/gear/{gear_id}"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Errore nel recupero dei dettagli scarpa {gear_id}: {e}")
+            return None
+
     def fetch_activity_details(self, activity_id):
         """
         Scarica il dettaglio completo di una singola attività.
