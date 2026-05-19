@@ -1,6 +1,8 @@
 from google import genai
 from .config import config
 from .database import db
+import PIL.Image
+import io
 
 class RunningAnalyst:
     def __init__(self):
@@ -213,5 +215,39 @@ class RunningAnalyst:
         except Exception as e:
             print(f"Errore Gemini durante analisi scarpa: {e}")
             return f"❌ Impossibile generare l'analisi per questa scarpa: {e}"
+
+    def extract_weight_from_image(self, image_bytes):
+        """Utilizza Gemini Flash per estrarre il peso numerico dallo screenshot"""
+        try:
+            # Convertiamo i bytes in un oggetto immagine che Gemini può leggere
+            image = PIL.Image.open(io.BytesIO(image_bytes))
+            
+            # Creiamo un prompt mirato per l'interfaccia dell'app Decathlon
+            prompt = """
+            Analizza questa immagine. È uno screenshot dell'app della bilancia Decathlon Scale 700.
+            Trova e restituiscimi ESCLUSIVAMENTE il numero che indica il peso corporeo attuale in kg.
+            Non aggiungere testo, commenti o l'unità di misura, solo il numero con il punto decimale.
+            Esempio di risposta corretta: 70.9
+            """
+            
+            print("🧠 [ANALYST] Invio screenshot a Gemini Flash...")
+            
+            # Passiamo al modello SIA il testo CHE l'immagine in una singola lista
+            response = self.model.generate_content([prompt, image])
+            
+            # Puliamo la risposta
+            peso_str = response.text.strip()
+            
+            try:
+                peso = float(peso_str)
+                print(f"✅ [ANALYST] Peso estratto correttamente dall'immagine: {peso} kg")
+                return peso
+            except ValueError:
+                print(f"⚠️ [ANALYST] Gemini ha risposto con formato non valido: {peso_str}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ [ANALYST] Errore durante analisi ottica: {e}")
+            return None
 
 analyst = RunningAnalyst()
