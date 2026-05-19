@@ -14,7 +14,7 @@ class RunningAnalyst:
         self.client = genai.Client(api_key=api_key)
         
         # 3. Usiamo la versione stabile e globale
-        self.model_id = "gemini-2.5-flash-lite"
+        self.model_id = "gemini-3.5-flash"
 
     def analyze_recent_performance(self):
         runs = db.get_recent_runs(limit=10)
