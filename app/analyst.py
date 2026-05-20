@@ -1,6 +1,9 @@
 from google import genai
 from .config import config
 from .database import db
+import PIL.Image
+import io
+import json
 
 class RunningAnalyst:
     def __init__(self):
@@ -213,5 +216,54 @@ class RunningAnalyst:
         except Exception as e:
             print(f"Errore Gemini durante analisi scarpa: {e}")
             return f"❌ Impossibile generare l'analisi per questa scarpa: {e}"
+
+    def extract_body_metrics_from_image(self, image_bytes):
+        """Utilizza Gemini Flash per estrarre le metriche corporee e restituirle in JSON"""
+        try:
+            image = PIL.Image.open(io.BytesIO(image_bytes))
+            
+            prompt = """Agisci come un analista di dati ed estrai le metriche corporee dallo screenshot di questa applicazione fitness.
+
+            Istruzioni:
+            Analizza l'immagine e individua i valori numerici associati alle diverse metriche del corpo.
+            Estrai la data in cui è stata effettuata la misurazione (si trova solitamente in basso).
+            Ignora gli elementi di navigazione (come "Anno", "Mese", "Aggiungi una pesata", ecc.).
+            Restituisci il risultato ESCLUSIVAMENTE in un formato JSON valido, utilizzando esattamente le chiavi elencate di seguito. Non aggiungere testo o commenti prima o dopo il JSON.
+
+            Chiavi JSON da utilizzare e formato richiesto:
+            "data": (stringa, formato "Giorno GG Mese AAAA")
+            "peso_kg": (numero decimale, usa il punto per i decimali)
+            "imc": (numero decimale)
+            "massa_grassa_percentuale": (numero decimale)
+            "massa_muscolare_percentuale": (numero decimale)
+            "massa_ossea_percentuale": (numero decimale)
+            "massa_idrica_percentuale": (numero decimale)"""
+            
+            print("🧠 [ANALYST] Invio screenshot a Gemini Flash per estrazione JSON...")
+            response = self.model.generate_content([prompt, image])
+            
+            # Gemini potrebbe aggiungere la formattazione markdown (```json ... ```), quindi la ripuliamo
+            json_text = response.text.strip()
+            if json_text.startswith("```json"):
+                json_text = json_text[7:]
+            if json_text.startswith("```"):
+                json_text = json_text[3:]
+            if json_text.endswith("```"):
+                json_text = json_text[:-3]
+                
+            json_text = json_text.strip()
+            
+            try:
+                # Trasformiamo la stringa JSON in un dizionario Python
+                dati_corporei = json.loads(json_text)
+                print(f"✅ [ANALYST] Metriche estratte: {dati_corporei}")
+                return dati_corporei
+            except json.JSONDecodeError as e:
+                print(f"⚠️ [ANALYST] Errore di decodifica JSON. Risposta grezza: {json_text}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ [ANALYST] Errore durante analisi ottica: {e}")
+            return None
 
 analyst = RunningAnalyst()
