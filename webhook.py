@@ -30,8 +30,43 @@ def process_run_analysis(activity_id):
         notifier.send_message(f"❌ Errore durante l'analisi: {e}")
 
 def process_fallback_weekly_report():
-    # [Il codice è identico a prima, lo ometto per brevità ma tu mantieni quello di prima]
-    pass 
+    try:
+        print("📅 [WEBHOOK] Avvio recupero settimana di fallback...")
+        notifier.send_message("🔍 Alla ricerca dell'ultimo periodo attivo su Strava...")
+        lista_corse, km_totali, start_date, end_date = strava_client.fetch_last_active_week()
+        
+        if not lista_corse:
+            notifier.send_message("❌ Non ho trovato nessuna sessione di corsa memorizzata nello storico recente.")
+            return
+            
+        data_inizio = start_date.strftime("%d/%m")
+        data_fine = end_date.strftime("%d/%m")
+        
+        notifier.send_message(f"🤖 Elaborazione del report per la settimana {data_inizio} - {data_fine}...")
+        feedback_raw = analyst.analyze_weekly_summary(lista_corse, km_totali)
+        
+        # Pulizia da eventuale markdown di Gemini
+        feedback_settimanale = feedback_raw.replace("```html", "").replace("```", "").strip()
+        
+        messaggio_telegram = f"📅 <b>Report Settimanale Fallback ({data_inizio} - {data_fine})</b>\n\n{feedback_settimanale}"
+        
+        # Creazione dei bottoni per ogni singola corsa trovata
+        bottoni = []
+        for corsa in lista_corse:
+            bottone = {
+                "text": f"📊 Analizza {corsa.get('nome', 'Corsa')}", 
+                "callback_data": f"analyze_{corsa['id']}"
+            }
+            bottoni.append([bottone])
+            
+        tastiera_inline = {"inline_keyboard": bottoni} if bottoni else None
+        
+        notifier.send_message(messaggio_telegram, reply_markup=tastiera_inline)
+        print("✅ [WEBHOOK] Report di fallback inviato correttamente.")
+        
+    except Exception as e:
+        print(f"❌ [WEBHOOK] Errore in process_fallback_weekly_report: {e}")
+        notifier.send_message(f"❌ Errore durante il recupero del report di fallback: {e}")
     
 # --- NUOVE FUNZIONI SCARPIERA ---
 def process_shoe_list():
