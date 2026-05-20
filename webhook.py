@@ -156,6 +156,44 @@ def telegram_webhook():
             elif callback_data.startswith('shoe_'):
                 gear_id = callback_data.split('_')[1]
                 process_shoe_analysis(gear_id)
+
+        # --- STEP 1: GESTIONE FOTO (SCREENSHOT BILANCIA) - SOLO LETTURA ---
+        if 'message' in update and 'photo' in update['message']:
+            print("📸 [WEBHOOK] Ricevuta foto in chat. Avvio pipeline OCR...")
+            
+            # Telegram invia la foto in varie risoluzioni, prendiamo la migliore (l'ultima)
+            foto_array = update['message']['photo']
+            best_photo = foto_array[-1]
+            file_id = best_photo['file_id']
+            
+            notifier.send_message("🔍 Analisi visiva dello screenshot in corso...")
+            
+            image_bytes = notifier.download_file(file_id)
+            
+            if image_bytes:
+                # Estraiamo i dati dal JSON
+                dati_corporei = analyst.extract_body_metrics_from_image(image_bytes)
+                
+                if dati_corporei:
+                    # Visualizziamo i dati su Telegram per confermare che l'estrazione funziona
+                    messaggio_successo = (
+                        f"⚖️ <b>Test Estrazione Metriche (Successo!)</b>\n\n"
+                        f"📅 Data: {dati_corporei.get('data', 'N/D')}\n"
+                        f"⚖️ Peso: <b>{dati_corporei.get('peso_kg', 'N/D')} kg</b>\n"
+                        f"📊 IMC: {dati_corporei.get('imc', 'N/D')}\n"
+                        f"🟡 Massa Grassa: {dati_corporei.get('massa_grassa_percentuale', 'N/D')}%\n"
+                        f"🔴 Massa Muscolare: {dati_corporei.get('massa_muscolare_percentuale', 'N/D')}%\n"
+                        f"🦴 Massa Ossea: {dati_corporei.get('massa_ossea_percentuale', 'N/D')}%\n"
+                        f"💧 Massa Idrica: {dati_corporei.get('massa_idrica_percentuale', 'N/D')}%\n\n"
+                        f"<i>Nessun dato è stato salvato nel database in questa fase.</i>"
+                    )
+                    notifier.send_message(messaggio_successo)
+                else:
+                    notifier.send_message("⚠️ Non sono riuscito a estrarre il JSON in modo corretto. Riprova.")
+            else:
+                notifier.send_message("❌ Errore durante il download dell'immagine da Telegram.")
+            
+            return jsonify({"status": "ok"}), 200
                 
         return jsonify({"status": "ok"}), 200
     except Exception as global_error:
