@@ -98,39 +98,7 @@ def telegram_webhook():
             if testo in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
                 process_shoe_list()
                 return jsonify({"status": "ok"}), 200
-
-        # --- NUOVO BLOCCO: GESTIONE FOTO (SCREENSHOT BILANCIA) ---
-        if 'message' in update and 'photo' in update['message']:
-            print("📸 [WEBHOOK] Ricevuta foto in chat. Avvio pipeline OCR...")
-            
-            # Telegram invia la stessa foto in varie risoluzioni (array). L'ultima è la migliore.
-            foto_array = update['message']['photo']
-            best_photo = foto_array[-1]
-            file_id = best_photo['file_id']
-            
-            # Sblocchiamo subito l'interfaccia avvisando dell'elaborazione in corso
-            notifier.send_message("🔍 Analisi visiva dello screenshot in corso...")
-            
-            # 1. Scarica i bytes
-            image_bytes = notifier.download_file(file_id)
-            
-            if image_bytes:
-                # 2. Passa i bytes all'analista (Gemini Flash)
-                peso_estratto = analyst.extract_weight_from_image(image_bytes)
-                
-                if peso_estratto:
-                    # 3. [TODO FUTURO: Salvare il dato su Firestore]
-                    # db.update_athlete_weight(peso_estratto)
-                    
-                    messaggio_successo = f"⚖️ <b>Peso Aggiornato!</b>\n\nHo letto correttamente <b>{peso_estratto} kg</b> dal tuo screenshot.\nQuesto dato verrà usato per calcolare l'usura delle tue scarpe."
-                    notifier.send_message(messaggio_successo)
-                else:
-                    notifier.send_message("⚠️ Non sono riuscito a estrarre un numero valido. Assicurati di inviare la schermata principale dell'app.")
-            else:
-                notifier.send_message("❌ Errore durante il download dell'immagine da Telegram.")
-            
-            return jsonify({"status": "ok"}), 200
-
+        
         # 2. GESTIONE DEI CLICK SUI BOTTONI
         if 'callback_query' in update:
             query = update['callback_query']
