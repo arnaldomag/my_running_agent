@@ -4,6 +4,7 @@ from .database import db
 import PIL.Image
 import io
 import json
+import google.genai.types as types
 
 class RunningAnalyst:
     def __init__(self):
@@ -18,6 +19,72 @@ class RunningAnalyst:
         
         # 3. Usiamo la versione stabile e globale
         self.model_id = "gemini-3.5-flash"
+
+    def chat_with_strava_context(self, chat_id, user_text):
+        """Gestisce una conversazione fluida iniettando l'ultimo allenamento come system instruction"""
+        try:
+            # 1. Recupero dinamico dell'ultimo allenamento dell'atleta (simulato o reale da database)
+            # Nota: Adatta questo recupero in base a come sono salvate le corse nel tuo db
+            recent_runs = db.get_recent_runs(limit=1)
+            activity_context = "Nessun allenamento recente trovato nel database."
+            
+            if recent_runs:
+                run = recent_runs[0]
+                distanza_km = run.get('distance', 0) / 1000
+                tempo_min = run.get('moving_time', 0) // 60
+                activity_context = (
+                    f"Data: {run.get('start_date', 'N/D')} | "
+                    f"Nome: {run.get('name', 'Corsa')} | "
+                    f"Distanza: {distanza_km:.2f} km | "
+                    f"Tempo: {tempo_min} min | "
+                    f"Scarpa: {run.get('scarpe', 'N/D')}"
+                )
+
+            # 2. Configurazione della System Instruction dinamica (Contesto invisibile)
+            full_system_instruction = (
+                "Sei 'my_running_agent', un assistente virtuale e coach esperto per la corsa. "
+                "Interagisci in modo cordiale, motivante, tecnico ma accessibile. "
+                "L'utente si allena 2-3 volte a settimana per preparare distanze di 10km e mezze maratone. "
+                f"Usa questo dato come contesto invisibile del suo ultimo allenamento: {activity_context}. "
+                "Fai riferimento a questi dati solo se sono pertinenti alla domanda o per dare contestualizzazione "
+                "ai suoi progressi. Rispondi usando la formattazione HTML consentita da Telegram (<b>, <i>)."
+            )
+
+            # 3. Lettura dello stato precedente da Firestore
+            contents, history_dicts = db.get_chat_history(chat_id)
+
+            # 4. Aggiunta del nuovo input dell'utente corrente alla sequenza stateless
+            contents.append(
+                genai.types.Content(
+                    role="user",
+                    parts=[genai.types.Part.from_text(text=user_text)]
+                )
+            )
+
+            # 5. Configurazione della chiamata all'SDK
+            config = genai.types.GenerateContentConfig(
+                system_instruction=full_system_instruction,
+                temperature=0.7
+            )
+
+            print(f"🧠 [ANALYST] Invio sessione chat a {self.model_id} (History size: {len(contents)})")
+            
+            # Eseguiamo la chiamata stateless
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=contents,
+                config=config
+            )
+            bot_reply = response.text
+
+            # 6. Salvataggio asincrono su Firestore dell'interazione lineare (formato dizionario)
+            db.save_chat_interaction(chat_id, history_dicts, user_text, bot_reply)
+
+            return bot_reply
+
+        except Exception as e:
+            print(f"❌ [ANALYST] Errore nella pipeline della chat AI: {e}")
+            return "Scusami, ho riscontrato un problema tecnico nel processare i nostri messaggi. Riprova tra poco!"
 
     def analyze_recent_performance(self):
         runs = db.get_recent_runs(limit=10)
