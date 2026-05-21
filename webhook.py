@@ -108,10 +108,18 @@ def process_shoe_analysis(gear_id):
             notifier.send_message("❌ Impossibile leggere i dati di questo modello.")
             return
             
-        notifier.send_message(f"🧠 Calcolo l'usura della schiuma per il modello {gear_details.get('name')}...")
-        report_scarpa = analyst.analyze_shoe(gear_details)
+        # 1. Recupero dinamico del peso da Firestore
+        peso_attuale = db.get_latest_weight()
         
-        # Pulizia da eventuale markdown aggiuntivo di Gemini
+        if peso_attuale:
+            notifier.send_message(f"🧠 Calcolo l'usura della schiuma considerando il tuo peso aggiornato ({peso_attuale} kg) e l'impatto su asfalto...")
+        else:
+            notifier.send_message("🧠 Calcolo l'usura della schiuma considerando l'utilizzo su strada...")
+            
+        # 2. Passaggio dei dati aggiornati all'Agente
+        report_scarpa = analyst.analyze_shoe(gear_details, peso_atleta=peso_attuale)
+        
+        # Pulizia da eventuale markdown aggiuntivo
         report_pulito = report_scarpa.replace("```html", "").replace("```", "").strip()
         
         messaggio_finale = f"👟 <b>Tagliando Materiali: {gear_details.get('name')}</b>\n\n{report_pulito}"

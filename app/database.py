@@ -52,5 +52,18 @@ class RunningDB:
             print(f"❌ [DATABASE] Errore durante il salvataggio su Firestore: {e}")
             return False
 
+    def get_latest_weight(self):
+        """Recupera il peso corporeo più recente salvato in Firestore"""
+        try:
+            # Recuperiamo un documento dalla collezione metrics
+            docs = self.db.collection("metrics").limit(1).get()
+            for doc in docs:
+                data = doc.to_dict()
+                return data.get("peso_kg")
+            return None
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore nel recupero del peso: {e}")
+            return None
+
 # Istanza pronta all'uso
 db = RunningDB()

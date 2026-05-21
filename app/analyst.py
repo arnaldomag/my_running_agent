@@ -177,12 +177,15 @@ class RunningAnalyst:
         except Exception as e:
             return f"Errore durante l'analisi della singola corsa: {e}"
 
-    def analyze_shoe(self, gear_details):
+    def analyze_shoe(self, gear_details, peso_atleta=None):
         """Analizza l'usura e le caratteristiche tecniche della scarpa"""
         nome = gear_details.get('name', 'Scarpa')
         brand = gear_details.get('brand_name', 'Sconosciuto')
         model_name = gear_details.get('model_name', 'Sconosciuto')
         km_attuali = gear_details.get('distance', 0) / 1000
+        
+        # Formattiamo il dato del peso in base alla presenza o meno nel database
+        peso_info = f"{peso_atleta} kg" if peso_atleta else "N/D (considera un peso medio di 70-75 kg)"
 
         prompt = f"""
         Analizza tecnicamente la seguente scarpa da running e il suo stato di usura:
@@ -190,13 +193,16 @@ class RunningAnalyst:
         - Marca: {brand}
         - Modello: {model_name}
         - Chilometri attuali: {km_attuali:.2f} km
+        - Superficie di utilizzo: ESCLUSIVAMENTE SU STRADA (asfalto)
+        - Peso dell'atleta: {peso_info}
+        - Altezza dell'atleta: 177 cm
 
         L'atleta la utilizza principalmente per allenamenti e gare su distanze di 10km e mezze maratone (21km).
         
         Struttura la risposta in modo chiaro:
         1. Fai un breve focus tecnico sul modello (es. tipo di schiuma PEBA/EVA, drop, presenza di piastre, reattività).
-        2. Indica qual è la durata media o "lifespan" (in km) per questa tipologia esatta di schiuma e modello.
-        3. Confronta i km attuali con la durata media, indicando se la scarpa è ancora nel suo "sweet spot", se sta perdendo ammortizzazione o se il rischio infortuni inizia ad alzarsi.
+        2. Indica qual è la durata media o "lifespan" (in km) per questa scarpa tenendo esplicitamente conto dell'impatto ripetuto sull'asfalto e delle precise caratteristiche fisiche dell'atleta.
+        3. Confronta i km attuali con la durata media. Considerando l'abrasione da strada e il peso specifico, la scarpa è ancora nel suo "sweet spot" o la schiuma si sta comprimendo in modo irreversibile?
         4. Dai un verdetto finale: è ora di iniziare a cercare la sostituta?
 
         REGOLE DI FORMATTAZIONE PER TELEGRAM:
