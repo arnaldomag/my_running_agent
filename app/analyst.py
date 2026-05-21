@@ -24,7 +24,7 @@ class RunningAnalyst:
         """Gestisce una conversazione fluida iniettando l'ultimo allenamento come system instruction"""
         try:
             # 1. Recupero dinamico dell'ultimo allenamento
-            recent_runs = db.get_recent_runs(limit=1)
+            recent_runs = db.get_recent_runs(limit=40)
             activity_context = "Nessun allenamento recente trovato nel database."
             
             if recent_runs:
