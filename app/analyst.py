@@ -21,53 +21,51 @@ class RunningAnalyst:
         self.model_id = "gemini-3.5-flash"
 
     def chat_with_strava_context(self, chat_id, user_text):
-        """Gestisce una conversazione fluida iniettando l'ultimo allenamento come system instruction"""
+        """Gestisce una conversazione fluida iniettando lo storico allenamenti come system instruction"""
         try:
-            # 1. Recupero dinamico dell'ultimo allenamento
+            # 1. Recupero dinamico di uno storico più ampio (es. ultime 40 corse)
             recent_runs = db.get_recent_runs(limit=40)
-            activity_context = "Nessun allenamento recente trovato nel database."
             
             if recent_runs:
-                run = recent_runs[0]
-                distanza_km = run.get('distance', 0) / 1000
-                tempo_min = run.get('moving_time', 0) // 60
-                
-                # Mappatura ufficiale dei Workout Type di Strava per la corsa
+                # Creiamo una lista compatta per dare molto contesto senza sprecare token
+                storico_compatto = []
                 strava_workout_types = {
-                    0: "Corsa Base / Recupero",
+                    0: "Recupero/Base",
                     1: "Gara",
                     2: "Lungo",
-                    3: "Allenamento di Qualità (Ripetute/Tempo Run)"
+                    3: "Qualità"
                 }
                 
-                # Recuperiamo l'ID e lo traduciamo (se non c'è, assumiamo sia Corsa Base)
-                tipo_id = run.get('workout_type')
-                tipo_corsa = strava_workout_types.get(tipo_id, "Corsa Base / Standard") if tipo_id is not None else "Corsa Base / Standard"
+                for run in recent_runs:
+                    tipo_id = run.get('workout_type')
+                    tipo_corsa = strava_workout_types.get(tipo_id, "Base") if tipo_id is not None else "Base"
+                    distanza_km = run.get('distance', 0) / 1000
+                    tempo_min = run.get('moving_time', 0) // 60
+                    
+                    # Creiamo una riga sintetica per ogni allenamento
+                    riga = f"- {run.get('start_date', 'N/D')}: {run.get('name', 'Corsa')} | Tipo: {tipo_corsa} | {distanza_km:.1f}km in {tempo_min}m | Scarpa: {run.get('scarpe', 'N/D')}"
+                    storico_compatto.append(riga)
                 
-                # Aggiungiamo il tipo di corsa alla stringa di contesto per Gemini
-                activity_context = (
-                    f"Data: {run.get('start_date', 'N/D')} | "
-                    f"Nome: {run.get('name', 'Corsa')} | "
-                    f"Tipo: {tipo_corsa} | "
-                    f"Distanza: {distanza_km:.2f} km | "
-                    f"Tempo: {tempo_min} min | "
-                    f"Scarpa: {run.get('scarpe', 'N/D')}"
-                )
+                activity_context = "\n".join(storico_compatto)
+            else:
+                activity_context = "Nessun allenamento recente trovato nel database."
 
-            # 2. Configurazione della System Instruction dinamica (Contesto invisibile)
+            # 2. Configurazione della System Instruction dinamica (Contesto invisibile espanso)
             full_system_instruction = (
                 "Sei 'my_running_agent', un assistente virtuale e coach esperto per la corsa. "
                 "Interagisci in modo cordiale, motivante, tecnico ma accessibile. "
                 "L'utente si allena 2-3 volte a settimana per preparare distanze di 10km e mezze maratone. "
-                f"Usa questo dato come contesto invisibile del suo ultimo allenamento: {activity_context}. "
-                "Fai riferimento a questi dati solo se sono pertinenti alla domanda o per dare contestualizzazione "
-                "ai suoi progressi. Rispondi usando la formattazione HTML consentita da Telegram (<b>, <i>)."
+                "Ecco l'elenco delle sue ultime attività da usare come contesto invisibile per rispondere alle sue domande:\n"
+                f"{activity_context}\n\n"
+                "Usa questi dati per rispondere a domande storiche (es. 'quante gare ho fatto quest'anno?', 'come sono andati gli ultimi lunghi?'). "
+                "Fai riferimento a questi dati per dare contestualizzazione ai suoi progressi. "
+                "Rispondi usando la formattazione HTML consentita da Telegram (<b>, <i>)."
             )
 
             # 3. Lettura dello stato precedente da Firestore
             contents, history_dicts = db.get_chat_history(chat_id)
 
-            # 4. Aggiunta del nuovo input dell'utente corrente alla sequenza stateless
+            # 4. Aggiunta del nuovo input dell'utente
             contents.append(
                 genai.types.Content(
                     role="user",
@@ -91,7 +89,7 @@ class RunningAnalyst:
             )
             bot_reply = response.text
 
-            # 6. Salvataggio asincrono su Firestore dell'interazione lineare (formato dizionario)
+            # 6. Salvataggio asincrono su Firestore
             db.save_chat_interaction(chat_id, history_dicts, user_text, bot_reply)
 
             return bot_reply
