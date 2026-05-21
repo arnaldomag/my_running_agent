@@ -135,14 +135,28 @@ def telegram_webhook():
         update = request.json
         print(f"📥 [WEBHOOK] Ricevuto update: {update}")
         
-        # 1. GESTIONE DEI COMANDI TESTUALI IN CHAT
+        # 1. GESTIONE MESSAGGI DI TESTO (COMANDI E CHAT AI)
         if 'message' in update and 'text' in update['message']:
-            testo = update['message']['text'].lower().strip()
-            # Se scrivi /elenco scarpe, /elencoscarpe o /scarpe, si attiva
-            if testo in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
-                process_shoe_list()
+            testo = update['message']['text'].strip()
+            testo_lower = testo.lower()
+            chat_id = update['message']['chat']['id']
+            
+            # A) Comandi strutturati
+            if testo.startswith('/'):
+                if testo_lower in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
+                    process_shoe_list()
+                else:
+                    notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
                 return jsonify({"status": "ok"}), 200
 
+            # B) Chat libera con l'Intelligenza Artificiale (MessageHandler)
+            print(f"💬 [WEBHOOK] Dirottamento chat_id {chat_id} verso l'AI Agent...")
+            notifier.send_message("✍️ L'agente sta elaborando la risposta...")
+            
+            risposta_agente = analyst.chat_with_strava_context(chat_id, testo)
+            notifier.send_message(risposta_agente)
+            
+            return jsonify({"status": "ok"}), 200
         # --- BLOCCO: GESTIONE FOTO (SCREENSHOT BILANCIA) ---
         if 'message' in update and 'photo' in update['message']:
             print("📸 [WEBHOOK] Ricevuta foto in chat. Avvio pipeline OCR...")
