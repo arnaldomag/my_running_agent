@@ -240,7 +240,11 @@ class RunningAnalyst:
             "massa_idrica_percentuale": (numero decimale)"""
             
             print("🧠 [ANALYST] Invio screenshot a Gemini Flash per estrazione JSON...")
-            response = self.client.models.generate_content([prompt, image])
+            # CORRETTO: Adesso passiamo esplicitamente model e contents
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[prompt, image]
+            )
             
             # Gemini potrebbe aggiungere la formattazione markdown (```json ... ```), quindi la ripuliamo
             json_text = response.text.strip()
