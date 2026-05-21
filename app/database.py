@@ -35,7 +35,7 @@ class RunningDB:
                       .limit(limit).stream()
         return [doc.to_dict() for doc in docs]
 
-        def save_body_metrics(self, metrics_data):
+    def save_body_metrics(self, metrics_data):
         """Salva le metriche corporee su Firestore nella collezione 'metrics'"""
         try:
             # Crea un ID documento pulito partendo dalla data (es: "sabato_16_maggio_2026")
