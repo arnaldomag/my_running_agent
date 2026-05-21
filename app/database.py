@@ -35,5 +35,22 @@ class RunningDB:
                       .limit(limit).stream()
         return [doc.to_dict() for doc in docs]
 
+    def save_body_metrics(self, metrics_data):
+        """Salva le metriche corporee su Firestore nella collezione 'metrics'"""
+        try:
+            # Crea un ID documento pulito partendo dalla data (es: "sabato_16_maggio_2026")
+            doc_id = metrics_data.get("data", "data_sconosciuta").replace(" ", "_").lower()
+            
+            # Riferimento alla collezione 'metrics' su Firestore
+            doc_ref = self.db.collection("metrics").document(doc_id)
+            
+            # Inseriamo i dati
+            doc_ref.set(metrics_data)
+            print(f"✅ [DATABASE] Metriche salvate su Firestore con ID Doc: {doc_id}")
+            return True
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore durante il salvataggio su Firestore: {e}")
+            return False
+
 # Istanza pronta all'uso
 db = RunningDB()
