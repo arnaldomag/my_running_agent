@@ -4,6 +4,7 @@ from app.config import config
 from app.strava_client import strava_client
 from app.analyst import analyst
 from app.telegram_client import notifier
+from app.database import db
 
 app = Flask(__name__)
 
