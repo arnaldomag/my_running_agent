@@ -133,49 +133,6 @@ def telegram_webhook():
             if testo in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
                 process_shoe_list()
                 return jsonify({"status": "ok"}), 200
-
-        # --- BLOCCO: GESTIONE FOTO (SCREENSHOT BILANCIA) ---
-        if 'message' in update and 'photo' in update['message']:
-            print("📸 [WEBHOOK] Ricevuta foto in chat. Avvio pipeline OCR...")
-            
-            foto_array = update['message']['photo']
-            best_photo = foto_array[-1]
-            file_id = best_photo['file_id']
-            
-            notifier.send_message("🔍 Analisi visiva dello screenshot in corso...")
-            
-            image_bytes = notifier.download_file(file_id)
-            
-            if image_bytes:
-                # 1. Estrazione tramite Gemini Flash
-                dati_corporei = analyst.extract_body_metrics_from_image(image_bytes)
-                
-                if dati_corporei:
-                    notifier.send_message("💾 Archiviazione dati nel Cloud di Firestore...")
-                    
-                    # 2. Scrittura su Firestore
-                    if db.save_body_metrics(dati_corporei):
-                        # 3. Conferma finale su Telegram
-                        messaggio_successo = (
-                            f"⚖️ <b>Metriche salvate su Firestore!</b>\n\n"
-                            f"📅 Data misurazione: {dati_corporei.get('data', 'N/D')}\n"
-                            f"⚖️ Peso: <b>{dati_corporei.get('peso_kg', 'N/D')} kg</b>\n"
-                            f"📊 IMC: {dati_corporei.get('imc', 'N/D')}\n"
-                            f"🟡 Massa Grassa: {dati_corporei.get('massa_grassa_percentuale', 'N/D')}%\n"
-                            f"🔴 Massa Muscolare: {dati_corporei.get('massa_muscolare_percentuale', 'N/D')}%\n"
-                            f"🦴 Massa Ossea: {dati_corporei.get('massa_ossea_percentuale', 'N/D')}%\n"
-                            f"💧 Massa Idrica: {dati_corporei.get('massa_idrica_percentuale', 'N/D')}%\n\n"
-                            f"🍀 <i>Il database del coach è aggiornato.</i>"
-                        )
-                        notifier.send_message(messaggio_successo)
-                    else:
-                        notifier.send_message("❌ Errore tecnico: Impossibile salvare i dati su Firestore.")
-                else:
-                    notifier.send_message("⚠️ Non sono riuscito a estrarre i dati formattati correttamente. Riprova.")
-            else:
-                notifier.send_message("❌ Errore durante il download dell'immagine da Telegram.")
-            
-            return jsonify({"status": "ok"}), 200
         
         # 2. GESTIONE DEI CLICK SUI BOTTONI
         if 'callback_query' in update:
