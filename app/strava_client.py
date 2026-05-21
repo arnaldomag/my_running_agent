@@ -71,7 +71,8 @@ class StravaClient:
                     "nome": activity.get('name'),
                     "data": data_str,
                     "distanza": round(distanza_km, 2),
-                    "id": activity.get('id')
+                    "id": activity.get('id'),
+                    "workout_type": activity.get('workout_type')
                 })
                 
         return lista_corse, round(km_totali, 2)
@@ -122,7 +123,8 @@ class StravaClient:
                         "nome": run.get("name"),
                         "distanza": run.get("distance", 0) / 1000,
                         "data": r_date.strftime("%d/%m/%Y"),  # 👈 ECCO LA CHIAVE RIPRISTINATA!
-                        "start_date": run.get("start_date_local") # Per massima compatibilità interna
+                        "start_date": run.get("start_date_local"), # Per massima compatibilità interna
+                        "workout_type": run.get("workout_type")
                     })
                     km_totali += run.get("distance", 0) / 1000
                     
@@ -187,6 +189,7 @@ class StravaClient:
                 "id": activity_details.get("id"),
                 "nome": activity_details.get("name"),
                 "tipo": activity_details.get("type"),
+                "workout_type": activity_details.get("workout_type"),
                 "distanza": activity_details.get("distance", 0) / 1000, # in km
                 "tempo_movimento": activity_details.get("moving_time", 0) / 60, # in minuti
                 "passo_medio": activity_details.get("average_speed", 0), # m/s

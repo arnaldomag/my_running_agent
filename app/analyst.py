@@ -23,8 +23,7 @@ class RunningAnalyst:
     def chat_with_strava_context(self, chat_id, user_text):
         """Gestisce una conversazione fluida iniettando l'ultimo allenamento come system instruction"""
         try:
-            # 1. Recupero dinamico dell'ultimo allenamento dell'atleta (simulato o reale da database)
-            # Nota: Adatta questo recupero in base a come sono salvate le corse nel tuo db
+            # 1. Recupero dinamico dell'ultimo allenamento
             recent_runs = db.get_recent_runs(limit=1)
             activity_context = "Nessun allenamento recente trovato nel database."
             
@@ -32,9 +31,24 @@ class RunningAnalyst:
                 run = recent_runs[0]
                 distanza_km = run.get('distance', 0) / 1000
                 tempo_min = run.get('moving_time', 0) // 60
+                
+                # Mappatura ufficiale dei Workout Type di Strava per la corsa
+                strava_workout_types = {
+                    0: "Corsa Base / Recupero",
+                    1: "Gara",
+                    2: "Lungo",
+                    3: "Allenamento di Qualità (Ripetute/Tempo Run)"
+                }
+                
+                # Recuperiamo l'ID e lo traduciamo (se non c'è, assumiamo sia Corsa Base)
+                tipo_id = run.get('workout_type')
+                tipo_corsa = strava_workout_types.get(tipo_id, "Corsa Base / Standard") if tipo_id is not None else "Corsa Base / Standard"
+                
+                # Aggiungiamo il tipo di corsa alla stringa di contesto per Gemini
                 activity_context = (
                     f"Data: {run.get('start_date', 'N/D')} | "
                     f"Nome: {run.get('name', 'Corsa')} | "
+                    f"Tipo: {tipo_corsa} | "
                     f"Distanza: {distanza_km:.2f} km | "
                     f"Tempo: {tempo_min} min | "
                     f"Scarpa: {run.get('scarpe', 'N/D')}"
