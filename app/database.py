@@ -1,11 +1,65 @@
 from google.cloud import firestore
 from .config import config
+from datetime import datetime, timezone
+from google import genai
 
 class RunningDB:
     def __init__(self):
         self.db = firestore.Client(project=config.project_id, database="my-running-agent")
         self.collection_name = "activities"
+    def get_chat_history(self, chat_id):
+        """Recupera la cronologia dei messaggi e la converte in oggetti Content dell'SDK"""
+        try:
+            doc_ref = self.db.collection("ai_chats").document(str(chat_id))
+            doc = doc_ref.get()
+            
+            history_dicts = []
+            if doc.exists:
+                history_dicts = doc.to_dict().get("history", [])
+                
+            # Convertiamo i dizionari piatti in oggetti genai.types.Content richiesti dall'SDK unificato
+            contents = []
+            for msg in history_dicts:
+                # Gestione di sicurezza sulla struttura delle parti
+                text_part = msg["parts"][0] if isinstance(msg["parts"], list) else msg["parts"]
+                
+                content_obj = genai.types.Content(
+                    role=msg["role"],
+                    parts=[genai.types.Part.from_text(text=text_part)]
+                )
+                contents.append(content_obj)
+                
+            return contents, history_dicts
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore nel recupero della cronologia chat: {e}")
+            return [], []
 
+    def save_chat_interaction(self, chat_id, history_dicts, user_text, bot_reply):
+        """Aggiorna l'array della cronologia mantenendo al massimo gli ultimi 10 messaggi"""
+        try:
+            doc_ref = self.db.collection("ai_chats").document(str(chat_id))
+            
+            # Appendiamo i nuovi messaggi alla lista dei dizionari esistenti
+            history_dicts.append({"role": "user", "parts": [user_text]})
+            history_dicts.append({"role": "model", "parts": [bot_reply]})
+            
+            # Applichiamo il limite massimo della rolling window (10 messaggi = 5 interazioni complete)
+            MAX_HISTORY_LENGTH = 10
+            if len(history_dicts) > MAX_HISTORY_LENGTH:
+                history_dicts = history_dicts[-MAX_HISTORY_LENGTH:]
+                
+            # Scrittura atomica su Firestore
+            doc_ref.set({
+                "last_updated": datetime.now(timezone.utc),
+                "history": history_dicts
+            }, merge=True)
+            
+            print(f"💾 [DATABASE] Cronologia chat aggiornata per chat_id: {chat_id}")
+            return True
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore nel salvataggio della cronologia chat: {e}")
+            return False
+    
     def run_test_write(self):
         """Funzione di test per verificare la scrittura"""
         doc_ref = self.db.collection('health_checks').document('current')
