@@ -245,7 +245,7 @@ class StravaClient:
                             'scarpe': act.get('gear_id', 'N/D')
                         }
                         # L'ID del documento è l'ID di Strava. merge=True aggiorna i campi se la corsa esiste già!
-                        db_instance.db.collection("runs").document(str(act['id'])).set(run_data, merge=True)
+                        db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
                         corse_salvate += 1
                 
                 page += 1
@@ -278,7 +278,7 @@ class StravaClient:
                         'workout_type': act.get('workout_type', 0),
                         'scarpe': act.get('gear_id', 'N/D')
                     }
-                    db_instance.db.collection("runs").document(str(act['id'])).set(run_data, merge=True)
+                    db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
             return True
         except Exception as e:
             print(f"⚠️ [STRAVA] Mini-sync fallito: {e}")
