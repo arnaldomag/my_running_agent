@@ -33,6 +33,12 @@ def process_run_analysis(activity_id):
 def process_fallback_weekly_report():
     try:
         print("📅 [WEBHOOK] Avvio recupero settimana di fallback...")
+
+        # --- AGGIUNTA FONDAMENTALE: AUTO-SYNC IN BACKGROUND ---
+        print("🔄 [WEBHOOK] Eseguo auto-sync delle ultime 30 attività prima del report...")
+        strava_client.sync_latest_activities(db, limit=30)
+        # ----------------------------------------------------
+
         notifier.send_message("🔍 Alla ricerca dell'ultimo periodo attivo su Strava...")
         lista_corse, km_totali, start_date, end_date = strava_client.fetch_last_active_week()
         
@@ -145,8 +151,21 @@ def telegram_webhook():
             if testo.startswith('/'):
                 if testo_lower in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
                     process_shoe_list()
+
+                elif testo_lower.startswith('/syncstorico'):
+                    parti = testo_lower.split()
+                    if len(parti) > 1 and parti[1].isdigit():
+                        anno = int(parti[1])
+                        notifier.send_message(f"⏳ Avvio sincronizzazione storica per l'anno {anno}. Scarico i dati da Strava e aggiorno il database, un attimo di pazienza...")
+                        
+                        corse_elaborate = strava_client.sync_historical_data_by_year(db, anno)
+                        
+                        notifier.send_message(f"✅ Sincronizzazione {anno} completata! Ho importato o aggiornato {corse_elaborate} corse su Firestore.")
+                    else:
+                        notifier.send_message("⚠️ Formato del comando non valido. Per favore usa la sintassi: /syncstorico [anno] (es. /syncstorico 2026)")
+
                 else:
-                    notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
+                    notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o /syncstorico 2026 o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
                 return jsonify({"status": "ok"}), 200
 
             # B) Chat libera con l'Intelligenza Artificiale (MessageHandler)
