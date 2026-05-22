@@ -164,8 +164,52 @@ def telegram_webhook():
                     else:
                         notifier.send_message("⚠️ Formato del comando non valido. Per favore usa la sintassi: /syncstorico [anno] (es. /syncstorico 2026)")
 
+                # --- NUOVA FUNZIONALITÀ: PIANIFICAZIONE SETTIMANALE ---
+                elif testo_lower.startswith('/pianifica'):
+                    # Rimuoviamo la parola chiave '/pianifica' e teniamo il resto
+                    testo_piano = testo[10:].strip()
+                    
+                    if not testo_piano:
+                        notifier.send_message("⚠️ Usa il comando così:\n/pianifica \nFartlek 10k\nRipetute 5x1000\nLungo 15k")
+                        return jsonify({"status": "ok"}), 200
+                        
+                    # Dividiamo gli allenamenti andando a capo (o usando la virgola)
+                    # Supportiamo sia l'andata a capo che la virgola come separatore
+                    separa_per = '\n' if '\n' in testo_piano else ','
+                    allenamenti = [a for a in testo_piano.split(separa_per) if a.strip()]
+                    
+                    if db.save_weekly_plan(allenamenti):
+                        notifier.send_message(f"✅ Piano salvato con successo! Hai {len(allenamenti)} sessioni previste questa settimana. Usa /piano per gestirle.")
+                    else:
+                        notifier.send_message("❌ Errore durante il salvataggio del piano.")
+                        
+                elif testo_lower == '/piano':
+                    piano = db.get_weekly_plan()
+                    
+                    if not piano or not piano.get("workouts"):
+                        notifier.send_message("📝 Non hai ancora pianificato nulla per questa settimana. Inserisci il tuo piano con il comando /pianifica.")
+                        return jsonify({"status": "ok"}), 200
+                        
+                    messaggio_piano = f"🗓️ <b>Il tuo Piano Settimanale ({piano['week_id']})</b>\n\n"
+                    bottoni = []
+                    
+                    for w in piano["workouts"]:
+                        stato_icona = "✅" if w["status"] == "done" else "🟡"
+                        messaggio_piano += f"{stato_icona} {w['descrizione']}\n"
+                        
+                        # Se non è ancora fatto, creiamo un bottone per spuntarlo
+                        if w["status"] == "todo":
+                            bottone = {
+                                "text": f"Spunta '{w['descrizione'][:15]}...'",
+                                "callback_data": f"markdone_{w['id']}"
+                            }
+                            bottoni.append([bottone])
+                    
+                    tastiera = {"inline_keyboard": bottoni} if bottoni else None
+                    notifier.send_message(messaggio_piano, reply_markup=tastiera)
+
                 else:
-                    notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o /syncstorico 2026 o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
+                    notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o /syncstorico 2026 o /pianifica o /piano o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
                 return jsonify({"status": "ok"}), 200
 
             # B) Chat libera con l'Intelligenza Artificiale (MessageHandler)
@@ -241,7 +285,15 @@ def telegram_webhook():
             elif callback_data.startswith('shoe_'):
                 gear_id = callback_data.split('_')[1]
                 process_shoe_analysis(gear_id)
-                
+
+            # BLOCCO PER I BOTTONI DEL WEEKLY PLAN
+            elif callback_data.startswith('markdone_'):
+                workout_id = callback_data.split('_')[1]
+                if db.mark_workout_as_done(workout_id):
+                    notifier.send_message("✅ Ottimo lavoro! Allenamento completato. Usa di nuovo /piano per vedere la situazione aggiornata.")
+                else:
+                    notifier.send_message("❌ Errore durante l'aggiornamento.")
+
         return jsonify({"status": "ok"}), 200
     except Exception as global_error:
         print(f"💥 [WEBHOOK] Errore critico globale nella rotta: {global_error}")
