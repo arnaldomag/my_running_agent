@@ -215,8 +215,8 @@ class StravaClient:
             headers = {'Authorization': f'Bearer {token}'}
             
             # Calcoliamo i timestamp per il 1° Gennaio e il 31 Dicembre dell'anno richiesto
-            start_date = datetime.datetime(year, 1, 1)
-            end_date = datetime.datetime(year, 12, 31, 23, 59, 59)
+            start_date = datetime(year, 1, 1)
+            end_date = datetime(year, 12, 31, 23, 59, 59)
             after_ts = int(start_date.timestamp())
             before_ts = int(end_date.timestamp())
             
