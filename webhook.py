@@ -216,28 +216,35 @@ def telegram_webhook():
                     else:
                         notifier.send_message("❌ Errore tecnico durante il salvataggio del piano.")
 
+                # --- VISUALIZZAZIONE PIANO AGGIORNATA ---
                 elif testo_lower == '/piano':
                     piano = db.get_weekly_plan()
                     
-                    if not piano or not piano.get("workouts"):
+                    # ATTENZIONE QUI: ora cerchiamo "sessions", non più "workouts"
+                    if not piano or not piano.get("sessions"):
                         notifier.send_message("📝 Non hai ancora pianificato nulla per questa settimana. Inserisci il tuo piano con il comando /pianifica.")
                         return jsonify({"status": "ok"}), 200
                         
                     messaggio_piano = f"🗓️ <b>Il tuo Piano Settimanale ({piano['week_id']})</b>\n\n"
                     bottoni = []
                     
-                    for w in piano["workouts"]:
-                        stato_icona = "✅" if w["status"] == "done" else "🟡"
-                        messaggio_piano += f"{stato_icona} {w['descrizione']}\n"
+                    # Cicliamo sulle "sessions"
+                    for s in piano["sessions"]:
+                        stato_icona = "✅" if s["status"] == "done" else "🟡"
+                        messaggio_piano += f"{stato_icona} <b>{s['name']}</b>\n"
                         
-                        # Se non è ancora fatto, creiamo un bottone per spuntarlo
-                        if w["status"] == "todo":
-                            bottone = {
-                                "text": f"Spunta '{w['descrizione'][:15]}...'",
-                                "callback_data": f"markdone_{w['id']}"
-                            }
-                            bottoni.append([bottone])
-                    
+                        # Elenca i sotto-step della sessione
+                        for step in s.get("steps", []):
+                            messaggio_piano += f"   • <i>{step}</i>\n"
+                        messaggio_piano += "\n"
+                        
+                        # Creiamo il bottone per spuntare l'intera sessione
+                        if s["status"] == "todo":
+                            bottoni.append([{
+                                "text": f"Smista/Chiudi {s['name']}",
+                                "callback_data": f"man_done_{s['id']}"
+                            }])
+                            
                     tastiera = {"inline_keyboard": bottoni} if bottoni else None
                     notifier.send_message(messaggio_piano, reply_markup=tastiera)
 
