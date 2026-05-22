@@ -1,4 +1,5 @@
 import requests
+import datetime
 from datetime import datetime, timedelta
 from .config import config
 
@@ -205,5 +206,82 @@ class StravaClient:
         except requests.exceptions.RequestException as e:
             print(f"❌ Errore nel recupero del dettaglio attività {activity_id}: {e}")
             return None
+
+    def sync_historical_data_by_year(self, db_instance, year):
+        """Scarica tutte le corse di un anno specifico e le aggiorna/salva su Firestore"""
+        try:
+            print(f"🔄 [STRAVA] Avvio sync storico per l'anno {year}...")
+            token = self.access_token # o il metodo che usi per avere il token valido
+            headers = {'Authorization': f'Bearer {token}'}
+            
+            # Calcoliamo i timestamp per il 1° Gennaio e il 31 Dicembre dell'anno richiesto
+            start_date = datetime.datetime(year, 1, 1)
+            end_date = datetime.datetime(year, 12, 31, 23, 59, 59)
+            after_ts = int(start_date.timestamp())
+            before_ts = int(end_date.timestamp())
+            
+            corse_salvate = 0
+            page = 1
+            
+            # Usiamo un ciclo while per gestire l'impaginazione (fino a 200 corse per pagina)
+            while True:
+                url = f"https://www.strava.com/api/v3/athlete/activities?after={after_ts}&before={before_ts}&per_page=200&page={page}"
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                activities = response.json()
+                
+                if not activities:
+                    break # Se la pagina è vuota, abbiamo scaricato tutto
+                    
+                for act in activities:
+                    if act.get('type') == 'Run':
+                        run_data = {
+                            'id': act['id'],
+                            'name': act['name'],
+                            'distance': act['distance'],
+                            'moving_time': act['moving_time'],
+                            'start_date': act['start_date_local'][:10],
+                            'workout_type': act.get('workout_type', 0),
+                            'scarpe': act.get('gear_id', 'N/D')
+                        }
+                        # L'ID del documento è l'ID di Strava. merge=True aggiorna i campi se la corsa esiste già!
+                        db_instance.db.collection("runs").document(str(act['id'])).set(run_data, merge=True)
+                        corse_salvate += 1
+                
+                page += 1
+            
+            print(f"✅ [STRAVA] Sync {year} completato: {corse_salvate} corse elaborate (nuove o aggiornate).")
+            return corse_salvate
+        except Exception as e:
+            print(f"❌ [STRAVA] Errore durante il sync dell'anno {year}: {e}")
+            return 0
+
+    def sync_latest_activities(self, db_instance, limit=30):
+        """Sync leggero e veloce delle ultime N attività per aggiornare modifiche recenti"""
+        try:
+            token = self.access_token
+            headers = {'Authorization': f'Bearer {token}'}
+            url = f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}"
+            
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            activities = response.json()
+            
+            for act in activities:
+                if act.get('type') == 'Run':
+                    run_data = {
+                        'id': act['id'],
+                        'name': act['name'],
+                        'distance': act['distance'],
+                        'moving_time': act['moving_time'],
+                        'start_date': act['start_date_local'][:10],
+                        'workout_type': act.get('workout_type', 0),
+                        'scarpe': act.get('gear_id', 'N/D')
+                    }
+                    db_instance.db.collection("runs").document(str(act['id'])).set(run_data, merge=True)
+            return True
+        except Exception as e:
+            print(f"⚠️ [STRAVA] Mini-sync fallito: {e}")
+            return False
 
 strava_client = StravaClient()
