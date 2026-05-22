@@ -164,25 +164,58 @@ def telegram_webhook():
                     else:
                         notifier.send_message("⚠️ Formato del comando non valido. Per favore usa la sintassi: /syncstorico [anno] (es. /syncstorico 2026)")
 
-                # --- NUOVA FUNZIONALITÀ: PIANIFICAZIONE SETTIMANALE ---
+                # --- PIANIFICAZIONE STRUTTURATA (TRAMITE RIGHE VUOTE) ---
                 elif testo_lower.startswith('/pianifica'):
-                    # Rimuoviamo la parola chiave '/pianifica' e teniamo il resto
+                    import re  # Aggiunto per gestire in modo sicuro gli a capo multipli
+                    
                     testo_piano = testo[10:].strip()
                     
                     if not testo_piano:
-                        notifier.send_message("⚠️ Usa il comando così:\n/pianifica \nFartlek 10k\nRipetute 5x1000\nLungo 15k")
+                        messaggio_aiuto = (
+                            "⚠️ Usa il comando separando le sessioni con una riga vuota, ad esempio:\n\n"
+                            "/pianifica\n"
+                            "Riscaldamento 20'\n"
+                            "Ripetute 10x100\n\n"
+                            "Lungo 15km"
+                        )
+                        notifier.send_message(messaggio_aiuto)
                         return jsonify({"status": "ok"}), 200
                         
-                    # Dividiamo gli allenamenti andando a capo (o usando la virgola)
-                    # Supportiamo sia l'andata a capo che la virgola come separatore
-                    separa_per = '\n' if '\n' in testo_piano else ','
-                    allenamenti = [a for a in testo_piano.split(separa_per) if a.strip()]
+                    # Dividiamo il testo in blocchi usando un'espressione regolare.
+                    # \n\s*\n significa "un a capo, seguito (forse) da spazi invisibili, seguito da un altro a capo"
+                    blocchi_sessioni = re.split(r'\n\s*\n', testo_piano)
                     
-                    if db.save_weekly_plan(allenamenti):
-                        notifier.send_message(f"✅ Piano salvato con successo! Hai {len(allenamenti)} sessioni previste questa settimana. Usa /piano per gestirle.")
-                    else:
-                        notifier.send_message("❌ Errore durante il salvataggio del piano.")
+                    sessioni = []
+                    counter_id = 0
+                    
+                    for blocco in blocchi_sessioni:
+                        blocco = blocco.strip()
+                        if not blocco:
+                            continue
+                            
+                        # Spezziamo il singolo blocco nelle sue righe interne (gli step)
+                        righe_step = [r.strip() for r in blocco.split('\n') if r.strip()]
                         
+                        # Generiamo noi il nome della sessione per comodità visiva
+                        sessioni.append({
+                            "id": counter_id,
+                            "name": f"Sessione {counter_id + 1}", 
+                            "steps": righe_step,
+                            "status": "todo",
+                            "run_id": None
+                        })
+                        counter_id += 1
+                    
+                    if not sessioni:
+                        notifier.send_message("⚠️ Non ho trovato allenamenti validi nel tuo messaggio.")
+                        return jsonify({"status": "ok"}), 200
+                        
+                    # Salviamo la struttura gerarchica su Firestore
+                    if db.save_weekly_plan_structured(sessioni):
+                        notifier.send_message(f"📝 <b>Piano Settimanale Creato!</b>\n\nHo elaborato <b>{len(sessioni)} sessioni</b> di allenamento dal tuo elenco. Usa il comando /piano per gestirle.")
+                    else:
+                        notifier.send_message("❌ Errore tecnico durante il salvataggio del piano.")
+
                 elif testo_lower == '/piano':
                     piano = db.get_weekly_plan()
                     
