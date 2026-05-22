@@ -211,7 +211,7 @@ class StravaClient:
         """Scarica tutte le corse di un anno specifico e le aggiorna/salva su Firestore"""
         try:
             print(f"🔄 [STRAVA] Avvio sync storico per l'anno {year}...")
-            token = self.access_token # o il metodo che usi per avere il token valido
+            token = self.get_access_token() # o il metodo che usi per avere il token valido
             headers = {'Authorization': f'Bearer {token}'}
             
             # Calcoliamo i timestamp per il 1° Gennaio e il 31 Dicembre dell'anno richiesto
@@ -259,7 +259,7 @@ class StravaClient:
     def sync_latest_activities(self, db_instance, limit=30):
         """Sync leggero e veloce delle ultime N attività per aggiornare modifiche recenti"""
         try:
-            token = self.access_token
+            token = self.get_access_token()
             headers = {'Authorization': f'Bearer {token}'}
             url = f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}"
             
