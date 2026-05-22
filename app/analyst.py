@@ -24,7 +24,7 @@ class RunningAnalyst:
         """Gestisce una conversazione fluida iniettando lo storico allenamenti come system instruction"""
         try:
             # 1. Recupero dinamico di uno storico più ampio (es. ultime 40 corse)
-            recent_runs = db.get_recent_runs(limit=40)
+            recent_runs = db.get_recent_runs(limit=100)
             
             if recent_runs:
                 # Creiamo una lista compatta per dare molto contesto senza sprecare token
