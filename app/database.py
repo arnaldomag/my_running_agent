@@ -1,6 +1,6 @@
 from google.cloud import firestore
 from .config import config
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from google import genai
 
 class RunningDB:
@@ -118,6 +118,72 @@ class RunningDB:
         except Exception as e:
             print(f"❌ [DATABASE] Errore nel recupero del peso: {e}")
             return None
+
+    def get_current_week_id(self):
+        """Calcola l'ID univoco per la settimana in corso (es: '2026_W21')"""
+        oggi = date.today()
+        anno, settimana, giorno_settimana = oggi.isocalendar()
+        return f"{anno}_W{settimana}"
+
+    def save_weekly_plan(self, workouts):
+        """Salva il piano di allenamento per la settimana in corso"""
+        try:
+            week_id = self.get_current_week_id()
+            doc_ref = self.db.collection("training_plans").document(week_id)
+            
+            # Creiamo una struttura per ogni allenamento
+            plan_data = {
+                "week_id": week_id,
+                "workouts": []
+            }
+            
+            for i, workout_text in enumerate(workouts):
+                plan_data["workouts"].append({
+                    "id": i, # Un indice semplice (0, 1, 2...)
+                    "descrizione": workout_text.strip(),
+                    "status": "todo", # Può essere 'todo' o 'done'
+                    "run_id": None # Qui salveremo l'ID di Strava quando lo assocerai
+                })
+                
+            doc_ref.set(plan_data)
+            return True
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore salvataggio piano: {e}")
+            return False
+
+    def get_weekly_plan(self):
+        """Recupera il piano della settimana in corso"""
+        try:
+            week_id = self.get_current_week_id()
+            doc = self.db.collection("training_plans").document(week_id).get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore recupero piano: {e}")
+            return None
+
+    def mark_workout_as_done(self, workout_id):
+        """Segna un allenamento come completato (MVP dell'associazione)"""
+        try:
+            week_id = self.get_current_week_id()
+            doc_ref = self.db.collection("training_plans").document(week_id)
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                data = doc.to_dict()
+                # Cerchiamo l'allenamento con l'ID corrispondente e lo aggiorniamo
+                for w in data["workouts"]:
+                    if str(w["id"]) == str(workout_id):
+                        w["status"] = "done"
+                        break
+                
+                doc_ref.set(data)
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore aggiornamento status allenamento: {e}")
+            return False
 
 # Istanza pronta all'uso
 db = RunningDB()
