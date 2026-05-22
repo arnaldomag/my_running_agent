@@ -213,7 +213,15 @@ class StravaClient:
             print(f"🔄 [STRAVA] Avvio sync storico per l'anno {year}...")
             token = self.get_access_token() # o il metodo che usi per avere il token valido
             headers = {'Authorization': f'Bearer {token}'}
-            
+
+            # --- 1. CREAZIONE DELLA MAPPA SCARPE (La Stele di Rosetta) ---
+            scarpe_atleta = self.fetch_athlete_shoes()
+            mappa_scarpe = {}
+            if scarpe_atleta:
+                for scarpa in scarpe_atleta:
+                    mappa_scarpe[scarpa['id']] = scarpa.get('name', 'Scarpa')
+            # -------------------------------------------------------------
+
             # Calcoliamo i timestamp per il 1° Gennaio e il 31 Dicembre dell'anno richiesto
             start_date = datetime(year, 1, 1)
             end_date = datetime(year, 12, 31, 23, 59, 59)
@@ -235,6 +243,10 @@ class StravaClient:
                     
                 for act in activities:
                     if act.get('type') == 'Run':
+                        # --- 2. TRADUZIONE DELL'ID NEL NOME REALE ---
+                        gear_id = act.get('gear_id')
+                        nome_scarpa = mappa_scarpe.get(gear_id, 'N/D') if gear_id else 'N/D'
+                        # --------------------------------------------
                         run_data = {
                             'id': act['id'],
                             'name': act['name'],
@@ -242,7 +254,7 @@ class StravaClient:
                             'moving_time': act['moving_time'],
                             'start_date': act['start_date_local'][:10],
                             'workout_type': act.get('workout_type', 0),
-                            'scarpe': act.get('gear_id', 'N/D')
+                            'scarpe': nome_scarpa
                         }
                         # L'ID del documento è l'ID di Strava. merge=True aggiorna i campi se la corsa esiste già!
                         db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
@@ -261,14 +273,26 @@ class StravaClient:
         try:
             token = self.get_access_token()
             headers = {'Authorization': f'Bearer {token}'}
-            url = f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}"
             
+            # --- 1. CREAZIONE DELLA MAPPA SCARPE ---
+            scarpe_atleta = self.fetch_athlete_shoes()
+            mappa_scarpe = {}
+            if scarpe_atleta:
+                for scarpa in scarpe_atleta:
+                    mappa_scarpe[scarpa['id']] = scarpa.get('name', 'Scarpa')
+            # ---------------------------------------
+
+            url = f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}"
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             activities = response.json()
             
             for act in activities:
                 if act.get('type') == 'Run':
+                    # --- 2. TRADUZIONE DELL'ID NEL NOME REALE ---
+                    gear_id = act.get('gear_id')
+                    nome_scarpa = mappa_scarpe.get(gear_id, 'N/D') if gear_id else 'N/D'
+                    # --------------------------------------------
                     run_data = {
                         'id': act['id'],
                         'name': act['name'],
@@ -276,7 +300,7 @@ class StravaClient:
                         'moving_time': act['moving_time'],
                         'start_date': act['start_date_local'][:10],
                         'workout_type': act.get('workout_type', 0),
-                        'scarpe': act.get('gear_id', 'N/D')
+                        'scarpe': nome_scarpa
                     }
                     db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
             return True
