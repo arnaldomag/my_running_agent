@@ -33,6 +33,12 @@ def process_run_analysis(activity_id):
 def process_fallback_weekly_report():
     try:
         print("📅 [WEBHOOK] Avvio recupero settimana di fallback...")
+
+        # --- AGGIUNTA FONDAMENTALE: AUTO-SYNC IN BACKGROUND ---
+        print("🔄 [WEBHOOK] Eseguo auto-sync delle ultime 30 attività prima del report...")
+        strava_client.sync_latest_activities(db, limit=30)
+        # ----------------------------------------------------
+
         notifier.send_message("🔍 Alla ricerca dell'ultimo periodo attivo su Strava...")
         lista_corse, km_totali, start_date, end_date = strava_client.fetch_last_active_week()
         
