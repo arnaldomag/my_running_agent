@@ -5,6 +5,7 @@ from app.strava_client import strava_client
 from app.analyst import analyst
 from app.telegram_client import notifier
 from app.database import db
+from datetime import datetime, date
 
 app = Flask(__name__)
 
@@ -74,7 +75,59 @@ def process_fallback_weekly_report():
     except Exception as e:
         print(f"❌ [WEBHOOK] Errore in process_fallback_weekly_report: {e}")
         notifier.send_message(f"❌ Errore durante il recupero del report di fallback: {e}")
-    
+
+def process_cron_weekly_report():
+    """Versione rigorosa del report settimanale: valuta SOLO gli ultimi 7 giorni reali"""
+    try:
+        print("⏰ [WEBHOOK] Avvio report settimanale schedulato...")
+        
+        # 1. Aggiornamento dati freschi
+        strava_client.sync_latest_activities(db, limit=30)
+
+        # 2. Estrazione
+        lista_corse, km_totali, start_date, end_date = strava_client.fetch_last_active_week()
+
+        # 3. Controllo della validità temporale
+        oggi = date.today()
+        # Estraiamo l'oggetto date in modo sicuro
+        fine_settimana = end_date.date() if isinstance(end_date, datetime) else end_date
+
+        # Se non ci sono corse, o se l'ultimo allenamento risale a più di 7 giorni fa
+        if not lista_corse or (oggi - fine_settimana).days > 7:
+            notifier.send_message("📭 <b>Report Settimanale</b>\n\nNon ho trovato nessuna attività registrata nell'ultima settimana. Goditi il riposo, ma non dimenticare il piano! 🏃‍♂️")
+            return
+
+        # Se i dati sono della settimana appena trascorsa, procediamo con l'analisi AI
+        data_inizio = start_date.strftime("%d/%m")
+        data_fine = end_date.strftime("%d/%m")
+
+        notifier.send_message(f"🤖 Elaborazione del report per la settimana {data_inizio} - {data_fine}...")
+        feedback_raw = analyst.analyze_weekly_summary(lista_corse, km_totali)
+        
+        # Pulizia da eventuale markdown di Gemini
+        feedback_settimanale = feedback_raw.replace("```html", "").replace("```", "").strip()
+        
+        messaggio_telegram = f"📅 <b>Report Settimanale ({data_inizio} - {data_fine})</b>\n\n{feedback_settimanale}"
+        
+        bottoni = []
+        for corsa in lista_corse:
+            # Compatibilità per chiavi 'nome' o 'name'
+            nome_corsa = corsa.get('nome', corsa.get('name', 'Corsa'))
+            bottone = {
+                "text": f"📊 Analizza {nome_corsa}", 
+                "callback_data": f"analyze_{corsa['id']}"
+            }
+            bottoni.append([bottone])
+            
+        tastiera_inline = {"inline_keyboard": bottoni} if bottoni else None
+        
+        notifier.send_message(messaggio_telegram, reply_markup=tastiera_inline)
+        print("✅ [WEBHOOK] Report cron inviato correttamente.")
+        
+    except Exception as e:
+        print(f"❌ [WEBHOOK] Errore in process_cron_weekly_report: {e}")
+        notifier.send_message("❌ Si è verificato un errore tecnico nella generazione del report automatico.")
+
 # --- NUOVE FUNZIONI SCARPIERA ---
 def process_shoe_list():
     try:
