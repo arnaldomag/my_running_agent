@@ -105,7 +105,15 @@ def process_cron_weekly_report():
             .order_by("start_date", direction="DESCENDING") \
             .get()
 
-        lista_corse = [doc.to_dict() for doc in query_corse]
+        # Creiamo la lista e aggiungiamo le chiavi in italiano per retrocompatibilità con l'Analyst
+        lista_corse = []
+        for doc in query_corse:
+            corsa_dict = doc.to_dict()
+            corsa_dict['data'] = corsa_dict.get('start_date', 'N/D')
+            corsa_dict['nome'] = corsa_dict.get('name', 'Corsa')
+            corsa_dict['distanza'] = corsa_dict.get('distance', 0)
+            corsa_dict['tempo'] = corsa_dict.get('moving_time', 0)
+            lista_corse.append(corsa_dict)
 
         # 4. Se l'elenco è vuoto, l'atleta ha riposato nella settimana di riferimento
         if not lista_corse:
