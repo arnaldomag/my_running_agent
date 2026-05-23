@@ -202,7 +202,7 @@ class RunningDB:
             return False
 
     def edit_session(self, session_id, nuovi_step):
-        """Sostituisce gli step di una sessione esistente"""
+        """Sostituisce gli step di una sessione esistente e la riporta a 'todo' (attiva)"""
         try:
             week_id = self.get_current_week_id()
             doc_ref = self.db.collection("training_plans").document(week_id)
@@ -212,10 +212,10 @@ class RunningDB:
                 data = doc.to_dict()
                 aggiornato = False
                 
-                # Cerchiamo la sessione e le sovrascriviamo l'elenco degli step
                 for s in data.get("sessions", []):
                     if str(s["id"]) == str(session_id):
                         s["steps"] = nuovi_step
+                        s["status"] = "todo"  # Ripristina lo stato ad attivo così puoi rigestirla
                         aggiornato = True
                         break
                 
@@ -225,6 +225,27 @@ class RunningDB:
             return False
         except Exception as e:
             print(f"❌ [DATABASE] Errore nella modifica della sessione: {e}")
+            return False
+
+    def reopen_session(self, session_id):
+        """Riporta una sessione completata (done) allo stato attivo (todo)"""
+        try:
+            week_id = self.get_current_week_id()
+            doc_ref = self.db.collection("training_plans").document(week_id)
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                data = doc.to_dict()
+                for s in data.get("sessions", []):
+                    if str(s["id"]) == str(session_id):
+                        s["status"] = "todo"
+                        break
+                
+                doc_ref.set(data)
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore nella riapertura della sessione: {e}")
             return False
 
 # Istanza pronta all'uso
