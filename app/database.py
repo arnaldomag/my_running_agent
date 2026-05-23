@@ -177,5 +177,55 @@ class RunningDB:
             print(f"❌ [DATABASE] Errore recupero piano: {e}")
             return None
 
+    def delete_session(self, session_id):
+        """Elimina una specifica sessione dall'array del piano settimanale"""
+        try:
+            week_id = self.get_current_week_id()
+            doc_ref = self.db.collection("training_plans").document(week_id)
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                data = doc.to_dict()
+                sessioni_originali = data.get("sessions", [])
+                
+                # Ricreiamo la lista tenendo tutto tranne la sessione con l'ID indicato
+                sessioni_aggiornate = [s for s in sessioni_originali if str(s["id"]) != str(session_id)]
+                
+                # Se la lunghezza è diminuita, significa che l'abbiamo trovata e rimossa
+                if len(sessioni_aggiornate) < len(sessioni_originali):
+                    data["sessions"] = sessioni_aggiornate
+                    doc_ref.set(data)
+                    return True
+            return False
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore nell'eliminazione della sessione: {e}")
+            return False
+
+    def edit_session(self, session_id, nuovi_step):
+        """Sostituisce gli step di una sessione esistente"""
+        try:
+            week_id = self.get_current_week_id()
+            doc_ref = self.db.collection("training_plans").document(week_id)
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                data = doc.to_dict()
+                aggiornato = False
+                
+                # Cerchiamo la sessione e le sovrascriviamo l'elenco degli step
+                for s in data.get("sessions", []):
+                    if str(s["id"]) == str(session_id):
+                        s["steps"] = nuovi_step
+                        aggiornato = True
+                        break
+                
+                if aggiornato:
+                    doc_ref.set(data)
+                    return True
+            return False
+        except Exception as e:
+            print(f"❌ [DATABASE] Errore nella modifica della sessione: {e}")
+            return False
+
 # Istanza pronta all'uso
 db = RunningDB()
