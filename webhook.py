@@ -216,7 +216,7 @@ def telegram_webhook():
                     else:
                         notifier.send_message("❌ Errore tecnico durante il salvataggio del piano.")
 
-                # --- VISUALIZZAZIONE PIANO AGGIORNATA (Con ID e bottone Elimina) ---
+                # --- VISUALIZZAZIONE PIANO COMPLETO DI BOTTONI SEMPRE ATTIVI ---
                 elif testo_lower == '/piano':
                     piano = db.get_weekly_plan()
                     
@@ -229,18 +229,23 @@ def telegram_webhook():
                     
                     for s in piano["sessions"]:
                         stato_icona = "✅" if s["status"] == "done" else "🟡"
-                        # Stampiamo anche l'ID per far sapere all'utente cosa inserire nel comando /modifica
                         messaggio_piano += f"{stato_icona} <b>{s['name']}</b> (ID: {s['id']})\n"
                         
                         for step in s.get("steps", []):
                             messaggio_piano += f"   • <i>{step}</i>\n"
                         messaggio_piano += "\n"
                         
+                        # Generazione dinamica dei bottoni in base allo stato
                         if s["status"] == "todo":
-                            # Creiamo una riga con DUE bottoni affiancati: Chiudi ed Elimina
                             bottoni.append([
-                                {"text": f"✅ Chiudi", "callback_data": f"man_done_{s['id']}"},
-                                {"text": f"❌ Elimina", "callback_data": f"del_sess_{s['id']}"}
+                                {"text": "✅ Chiudi", "callback_data": f"man_done_{s['id']}"},
+                                {"text": "❌ Elimina", "callback_data": f"del_sess_{s['id']}"}
+                            ])
+                        else:
+                            # Se è già completata, diamo la possibilità di riaprirla o eliminarla comunque!
+                            bottoni.append([
+                                {"text": "↩️ Riapri", "callback_data": f"reopen_sess_{s['id']}"},
+                                {"text": "❌ Elimina", "callback_data": f"del_sess_{s['id']}"}
                             ])
                             
                     tastiera = {"inline_keyboard": bottoni} if bottoni else None
@@ -367,6 +372,16 @@ def telegram_webhook():
                     notifier.send_message("🗑️ Sessione rimossa dal piano settimanale! Usa /piano per aggiornare la visuale.")
                 else:
                     notifier.send_message("❌ Errore durante l'eliminazione della sessione.")
+
+            # --- RIAPERTURA SESSIONE DA STATO COMPLETATO ---
+            elif callback_data.startswith('reopen_sess_'):
+                session_id = callback_data.replace('reopen_sess_', '')
+                
+                if db.reopen_session(session_id):
+                    notifier.send_message("↩️ Sessione riaperta! È di nuovo attiva nel tuo piano. Digita /piano per aggiornare la visualizzazione.")
+                else:
+                    notifier.send_message("❌ Errore durante la riapertura della sessione.")
+
 
         return jsonify({"status": "ok"}), 200
     except Exception as global_error:
