@@ -448,7 +448,7 @@ def tasks_weekly_report():
         print("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler!")
         
         # Invochiamo la funzione esistente che fa il sync leggero e genera il report
-        process_fallback_weekly_report()
+        process_cron_weekly_report()
         
         return jsonify({"status": "ok", "message": "Report settimanale avviato con successo."}), 200
     except Exception as e:
