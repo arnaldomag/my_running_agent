@@ -388,5 +388,19 @@ def telegram_webhook():
         print(f"💥 [WEBHOOK] Errore critico globale nella rotta: {global_error}")
         return jsonify({"status": "error", "message": str(global_error)}), 500
 
+# --- ENDPOINT PER CLOUD SCHEDULER (CRON JOB) ---
+@app.route('/tasks/weekly-report', methods=['POST'])
+def tasks_weekly_report():
+    try:
+        print("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler!")
+        
+        # Invochiamo la funzione esistente che fa il sync leggero e genera il report
+        process_fallback_weekly_report()
+        
+        return jsonify({"status": "ok", "message": "Report settimanale avviato con successo."}), 200
+    except Exception as e:
+        print(f"❌ [CRON] Errore durante l'esecuzione del cron job: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
