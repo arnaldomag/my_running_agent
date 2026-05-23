@@ -216,11 +216,10 @@ def telegram_webhook():
                     else:
                         notifier.send_message("❌ Errore tecnico durante il salvataggio del piano.")
 
-                # --- VISUALIZZAZIONE PIANO AGGIORNATA ---
+                # --- VISUALIZZAZIONE PIANO AGGIORNATA (Con ID e bottone Elimina) ---
                 elif testo_lower == '/piano':
                     piano = db.get_weekly_plan()
                     
-                    # ATTENZIONE QUI: ora cerchiamo "sessions", non più "workouts"
                     if not piano or not piano.get("sessions"):
                         notifier.send_message("📝 Non hai ancora pianificato nulla per questa settimana. Inserisci il tuo piano con il comando /pianifica.")
                         return jsonify({"status": "ok"}), 200
@@ -228,25 +227,48 @@ def telegram_webhook():
                     messaggio_piano = f"🗓️ <b>Il tuo Piano Settimanale ({piano['week_id']})</b>\n\n"
                     bottoni = []
                     
-                    # Cicliamo sulle "sessions"
                     for s in piano["sessions"]:
                         stato_icona = "✅" if s["status"] == "done" else "🟡"
-                        messaggio_piano += f"{stato_icona} <b>{s['name']}</b>\n"
+                        # Stampiamo anche l'ID per far sapere all'utente cosa inserire nel comando /modifica
+                        messaggio_piano += f"{stato_icona} <b>{s['name']}</b> (ID: {s['id']})\n"
                         
-                        # Elenca i sotto-step della sessione
                         for step in s.get("steps", []):
                             messaggio_piano += f"   • <i>{step}</i>\n"
                         messaggio_piano += "\n"
                         
-                        # Creiamo il bottone per spuntare l'intera sessione
                         if s["status"] == "todo":
-                            bottoni.append([{
-                                "text": f"Smista/Chiudi {s['name']}",
-                                "callback_data": f"man_done_{s['id']}"
-                            }])
+                            # Creiamo una riga con DUE bottoni affiancati: Chiudi ed Elimina
+                            bottoni.append([
+                                {"text": f"✅ Chiudi", "callback_data": f"man_done_{s['id']}"},
+                                {"text": f"❌ Elimina", "callback_data": f"del_sess_{s['id']}"}
+                            ])
                             
                     tastiera = {"inline_keyboard": bottoni} if bottoni else None
                     notifier.send_message(messaggio_piano, reply_markup=tastiera)
+
+                # --- MODIFICA DI UNA SINGOLA SESSIONE ---
+                elif testo_lower.startswith('/modifica'):
+                    # Dividiamo alla primissima riga a capo
+                    parti = testo.split('\n', 1) 
+                    
+                    if len(parti) < 2:
+                        notifier.send_message("⚠️ Formato errato. Usa la sintassi:\n\n/modifica [ID]\nnuovo step 1\nnuovo step 2")
+                        return jsonify({"status": "ok"}), 200
+                    
+                    # Estraiamo l'ID dalla prima riga (es. "/modifica 0")
+                    prima_riga = parti[0].strip().split()
+                    if len(prima_riga) < 2 or not prima_riga[1].isdigit():
+                        notifier.send_message("⚠️ Devi specificare l'ID numerico della sessione accanto al comando. Esempio:\n/modifica 0")
+                        return jsonify({"status": "ok"}), 200
+                    
+                    session_id = prima_riga[1]
+                    # Ricostruiamo i nuovi step ignorando le righe vuote
+                    nuovi_step = [r.strip() for r in parti[1].split('\n') if r.strip()]
+                    
+                    if db.edit_session(session_id, nuovi_step):
+                        notifier.send_message(f"✏️ Sessione (ID: {session_id}) aggiornata con successo! Usa /piano per vedere le modifiche.")
+                    else:
+                        notifier.send_message(f"❌ Impossibile modificare. Sicuro che l'ID {session_id} esista e non sia stato cancellato?")
 
                 else:
                     notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o /syncstorico 2026 o /pianifica o /piano o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
@@ -337,6 +359,14 @@ def telegram_webhook():
                 else:
                     notifier.send_message("❌ Errore durante l'aggiornamento della sessione.")
 
+            # --- ELIMINAZIONE SESSIONE ---
+            elif callback_data.startswith('del_sess_'):
+                session_id = callback_data.replace('del_sess_', '')
+                
+                if db.delete_session(session_id):
+                    notifier.send_message("🗑️ Sessione rimossa dal piano settimanale! Usa /piano per aggiornare la visuale.")
+                else:
+                    notifier.send_message("❌ Errore durante l'eliminazione della sessione.")
 
         return jsonify({"status": "ok"}), 200
     except Exception as global_error:
