@@ -326,13 +326,16 @@ def telegram_webhook():
                 gear_id = callback_data.split('_')[1]
                 process_shoe_analysis(gear_id)
 
-            # BLOCCO PER I BOTTONI DEL WEEKLY PLAN
-            elif callback_data.startswith('markdone_'):
-                workout_id = callback_data.split('_')[1]
-                if db.mark_workout_as_done(workout_id):
-                    notifier.send_message("✅ Ottimo lavoro! Allenamento completato. Usa di nuovo /piano per vedere la situazione aggiornata.")
+            # --- AGGIORNAMENTO: COMPLETAMENTO SESSIONE STRUTTURATA ---
+            elif callback_data.startswith('man_done_'):
+                session_id = callback_data.split('_')[1]
+                
+                # Richiamiamo la nuova funzione definita in database.py
+                if db.mark_session_as_done(session_id):
+                    notifier.send_message("🎯 Sessione completata e archiviata! Usa /piano per vedere lo stato aggiornato.")
                 else:
-                    notifier.send_message("❌ Errore durante l'aggiornamento.")
+                    notifier.send_message("❌ Errore durante l'aggiornamento della sessione.")
+
 
         return jsonify({"status": "ok"}), 200
     except Exception as global_error:
