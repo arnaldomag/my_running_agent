@@ -329,7 +329,7 @@ def telegram_webhook():
             # --- AGGIORNAMENTO: COMPLETAMENTO SESSIONE STRUTTURATA ---
             elif callback_data.startswith('man_done_'):
                # session_id = callback_data.split('_')[1]
-            session_id = callback_data.replace('man_done_', '')
+                session_id = callback_data.replace('man_done_', '')
                 
                 # Richiamiamo la nuova funzione definita in database.py
                 if db.mark_session_as_done(session_id):
