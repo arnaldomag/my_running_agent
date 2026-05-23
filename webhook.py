@@ -359,6 +359,14 @@ def telegram_webhook():
                 else:
                     notifier.send_message("❌ Errore durante l'aggiornamento della sessione.")
 
+            # --- ELIMINAZIONE SESSIONE ---
+            elif callback_data.startswith('del_sess_'):
+                session_id = callback_data.replace('del_sess_', '')
+                
+                if db.delete_session(session_id):
+                    notifier.send_message("🗑️ Sessione rimossa dal piano settimanale! Usa /piano per aggiornare la visuale.")
+                else:
+                    notifier.send_message("❌ Errore durante l'eliminazione della sessione.")
 
         return jsonify({"status": "ok"}), 200
     except Exception as global_error:
