@@ -1,5 +1,4 @@
 import requests
-import datetime
 from datetime import datetime, timedelta
 from .config import config
 
@@ -22,122 +21,108 @@ class StravaClient:
         response.raise_for_status()
         return response.json()['access_token']
 
-    def fetch_recent_activities(self, limit=5):
-        """Scarica le ultime attività dall'API di Strava"""
-        token = self.get_access_token()
-        headers = {'Authorization': f"Bearer {token}"}
-        params = {'per_page': limit}
-        
-        response = requests.get(f"{self.base_url}/athlete/activities", headers=headers, params=params)
-        response.raise_for_status()
-        return response.json()
+    # ==========================================
+    # 1. UTILITY INTERNE
+    # ==========================================
+    def _get_shoe_mapping(self):
+        """Genera un dizionario {gear_id: nome_scarpa} scaricando la scarpiera"""
+        scarpe_atleta = self.fetch_athlete_shoes()
+        mappa_scarpe = {}
+        if scarpe_atleta:
+            for scarpa in scarpe_atleta:
+                mappa_scarpe[scarpa['id']] = scarpa.get('name', 'Scarpa')
+        return mappa_scarpe
 
-    def fetch_weekly_runs(self):
-        """Scarica e aggrega solo le corse della settimana corrente (da lunedì a oggi)"""
-        token = self.get_access_token()
-        headers = {'Authorization': f"Bearer {token}"}
-        
-        # 1. Calcolo del Lunedì di questa settimana a mezzanotte
-        oggi = datetime.now()
-        giorni_da_lunedi = oggi.weekday()  # 0 = Lunedì, 6 = Domenica
-        lunedi = oggi - timedelta(days=giorni_da_lunedi)
-        inizio_settimana = lunedi.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        epoch_after = int(inizio_settimana.timestamp())
-        
-        # 2. Parametri per la chiamata API
-        params = {
-            "after": epoch_after,
-            "per_page": 30  # Limite di sicurezza ampio per una singola settimana
-        }
-        
-        response = requests.get(f"{self.base_url}/athlete/activities", headers=headers, params=params)
-        response.raise_for_status()
-        activities = response.json()
-        
-        # 3. Filtraggio e Aggregazione dei dati
-        lista_corse = []
-        km_totali = 0.0
-        
-        for activity in activities:
-            # Filtriamo solo le attività registrate come corsa
-            if activity.get('type') == 'Run':
-                distanza_km = activity.get('distance', 0) / 1000
-                km_totali += distanza_km
-                
-                # Estraiamo la data formattata YYYY-MM-DD
-                data_str = activity.get('start_date_local', '')[:10]
-                
-                lista_corse.append({
-                    "nome": activity.get('name'),
-                    "data": data_str,
-                    "distanza": round(distanza_km, 2),
-                    "id": activity.get('id'),
-                    "workout_type": activity.get('workout_type')
-                })
-                
-        return lista_corse, round(km_totali, 2)
-
-    def fetch_last_active_week(self):
-        """
-        Scarica le attività recenti, individua l'ultima corsa effettuata
-        e restituisce tutti gli allenamenti di quella specifica settimana.
-        """
-        token = self.get_access_token()
-        headers = {'Authorization': f"Bearer {token}"}
-        
-        # Chiediamo le ultime 30 attività per essere sicuri di andare abbastanza indietro
-        url = f"{self.base_url}/athlete/activities?per_page=30"
-        
+    # ==========================================
+    # 2. PIPELINE DI SINCRONIZZAZIONE (FIRESTORE)
+    # ==========================================
+    def sync_latest_activities(self, db_instance, limit=30):
+        """Sync leggero e veloce delle ultime N attività per aggiornare modifiche recenti"""
         try:
+            token = self.get_access_token()
+            headers = {'Authorization': f'Bearer {token}'}
+            
+            mappa_scarpe = self._get_shoe_mapping()
+
+            url = f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}"
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             activities = response.json()
             
-            # Filtriamo per tenere solo le corse
-            runs = [act for act in activities if act.get('type') == 'Run']
-            
-            if not runs:
-                return [], 0, None, None  # Nessuna corsa trovata nello storico recente
-                
-            # La corsa in indice 0 è la più recente in assoluto
-            ultima_corsa = runs[0]
-            
-            # Gestione della data
-            data_str = ultima_corsa['start_date_local'].replace('Z', '+00:00')
-            run_date = datetime.fromisoformat(data_str)
-            
-            # Calcoliamo i confini (Lunedì e Domenica) della settimana a cui appartiene questa corsa
-            start_of_week = run_date - timedelta(days=run_date.weekday())
-            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
-            
-            # Ora raccogliamo TUTTE le corse di QUELLA settimana specifica
-            settimana_attiva = []
-            km_totali = 0
-            
-            for run in runs:
-                r_date = datetime.fromisoformat(run['start_date_local'].replace('Z', '+00:00'))
-                if start_of_week <= r_date <= end_of_week:
-                    settimana_attiva.append({
-                        "id": run.get("id"),
-                        "nome": run.get("name"),
-                        "distanza": run.get("distance", 0) / 1000,
-                        "data": r_date.strftime("%d/%m/%Y"),  # 👈 ECCO LA CHIAVE RIPRISTINATA!
-                        "start_date": run.get("start_date_local"), # Per massima compatibilità interna
-                        "workout_type": run.get("workout_type")
-                    })
-                    km_totali += run.get("distance", 0) / 1000
+            for act in activities:
+                if act.get('type') == 'Run':
+                    gear_id = act.get('gear_id')
+                    nome_scarpa = mappa_scarpe.get(gear_id, 'N/D') if gear_id else 'N/D'
                     
-            # Giriamo in ordine cronologico corretto
-            settimana_attiva.reverse()
+                    run_data = {
+                        'id': act['id'],
+                        'name': act['name'],
+                        'distance': act['distance'],
+                        'moving_time': act['moving_time'],
+                        'start_date': act['start_date_local'][:10],
+                        'workout_type': act.get('workout_type', 0),
+                        'scarpe': nome_scarpa
+                    }
+                    db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
+            return True
+        except Exception as e:
+            print(f"⚠️ [STRAVA] Mini-sync fallito: {e}")
+            return False
+
+    def sync_historical_data_by_year(self, db_instance, year):
+        """Scarica tutte le corse di un anno specifico e le aggiorna/salva su Firestore"""
+        try:
+            print(f"🔄 [STRAVA] Avvio sync storico per l'anno {year}...")
+            token = self.get_access_token()
+            headers = {'Authorization': f'Bearer {token}'}
+
+            mappa_scarpe = self._get_shoe_mapping()
+
+            start_date = datetime(year, 1, 1)
+            end_date = datetime(year, 12, 31, 23, 59, 59)
+            after_ts = int(start_date.timestamp())
+            before_ts = int(end_date.timestamp())
             
-            return settimana_attiva, km_totali, start_of_week, end_of_week
+            corse_salvate = 0
+            page = 1
+            
+            while True:
+                url = f"https://www.strava.com/api/v3/athlete/activities?after={after_ts}&before={before_ts}&per_page=200&page={page}"
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                activities = response.json()
+                
+                if not activities:
+                    break
+                    
+                for act in activities:
+                    if act.get('type') == 'Run':
+                        gear_id = act.get('gear_id')
+                        nome_scarpa = mappa_scarpe.get(gear_id, 'N/D') if gear_id else 'N/D'
+                        
+                        run_data = {
+                            'id': act['id'],
+                            'name': act['name'],
+                            'distance': act['distance'],
+                            'moving_time': act['moving_time'],
+                            'start_date': act['start_date_local'][:10],
+                            'workout_type': act.get('workout_type', 0),
+                            'scarpe': nome_scarpa
+                        }
+                        db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
+                        corse_salvate += 1
+                
+                page += 1
+            
+            print(f"✅ [STRAVA] Sync {year} completato: {corse_salvate} corse elaborate (nuove o aggiornate).")
+            return corse_salvate
+        except Exception as e:
+            print(f"❌ [STRAVA] Errore durante il sync dell'anno {year}: {e}")
+            return 0
 
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Errore nel recupero della settimana attiva retroattiva: {e}")
-            return [], 0, None, None
-
+    # ==========================================
+    # 3. LETTURE LIVE DA STRAVA (Dettagli AI)
+    # ==========================================
     def fetch_athlete_shoes(self):
         """Recupera la lista delle scarpe registrate sul profilo atleta"""
         token = self.get_access_token()
@@ -148,7 +133,6 @@ class StravaClient:
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             athlete_data = response.json()
-            # Strava restituisce un array 'shoes' con le scarpe
             return athlete_data.get('shoes', [])
         except requests.exceptions.RequestException as e:
             print(f"❌ Errore nel recupero della scarpiera: {e}")
@@ -169,14 +153,9 @@ class StravaClient:
             return None
 
     def fetch_activity_details(self, activity_id):
-        """
-        Scarica il dettaglio completo di una singola attività.
-        È l'unico endpoint che restituisce il campo 'private_note'.
-        """
+        """Scarica il dettaglio completo di una singola attività (incluso private_note e laps)"""
         token = self.get_access_token()
         headers = {'Authorization': f"Bearer {token}"}
-        
-        # Endpoint specifico per il dettaglio
         url = f"{self.base_url}/activities/{activity_id}"
         
         try:
@@ -184,128 +163,74 @@ class StravaClient:
             response.raise_for_status()
             activity_details = response.json()
             
-            # Estraiamo i campi chiave per l'analisi dell'agente
-            # Se un campo è mancante, usiamo dei valori di default sicuri
             data_pulita = {
                 "id": activity_details.get("id"),
                 "nome": activity_details.get("name"),
                 "tipo": activity_details.get("type"),
                 "workout_type": activity_details.get("workout_type"),
-                "distanza": activity_details.get("distance", 0) / 1000, # in km
-                "tempo_movimento": activity_details.get("moving_time", 0) / 60, # in minuti
-                "passo_medio": activity_details.get("average_speed", 0), # m/s
+                "distanza": activity_details.get("distance", 0) / 1000,
+                "tempo_movimento": activity_details.get("moving_time", 0) / 60,
+                "passo_medio": activity_details.get("average_speed", 0),
                 "bpm_medi": activity_details.get("average_heartrate", "N/D"),
                 "dislivello": activity_details.get("total_elevation_gain", 0),
                 "scarpe": activity_details.get("gear", {}).get("name", "Non specificate"),
-                "note_private": activity_details.get("private_note", ""), # Qui c'è la struttura dell'allenamento
-                "laps": activity_details.get("laps", []) # Utile per vedere i ritmi ogni lap
+                "note_private": activity_details.get("private_note", ""),
+                "laps": activity_details.get("laps", [])
             }
-            
             return data_pulita
             
         except requests.exceptions.RequestException as e:
             print(f"❌ Errore nel recupero del dettaglio attività {activity_id}: {e}")
             return None
 
-    def sync_historical_data_by_year(self, db_instance, year):
-        """Scarica tutte le corse di un anno specifico e le aggiorna/salva su Firestore"""
+    # ==========================================
+    # 4. METODI FALLBACK / LEGACY
+    # ==========================================
+    def fetch_last_active_week(self):
+        """Individua l'ultima corsa effettuata e restituisce la relativa settimana."""
+        token = self.get_access_token()
+        headers = {'Authorization': f"Bearer {token}"}
+        url = f"{self.base_url}/athlete/activities?per_page=30"
+        
         try:
-            print(f"🔄 [STRAVA] Avvio sync storico per l'anno {year}...")
-            token = self.get_access_token() # o il metodo che usi per avere il token valido
-            headers = {'Authorization': f'Bearer {token}'}
-
-            # --- 1. CREAZIONE DELLA MAPPA SCARPE (La Stele di Rosetta) ---
-            scarpe_atleta = self.fetch_athlete_shoes()
-            mappa_scarpe = {}
-            if scarpe_atleta:
-                for scarpa in scarpe_atleta:
-                    mappa_scarpe[scarpa['id']] = scarpa.get('name', 'Scarpa')
-            # -------------------------------------------------------------
-
-            # Calcoliamo i timestamp per il 1° Gennaio e il 31 Dicembre dell'anno richiesto
-            start_date = datetime(year, 1, 1)
-            end_date = datetime(year, 12, 31, 23, 59, 59)
-            after_ts = int(start_date.timestamp())
-            before_ts = int(end_date.timestamp())
-            
-            corse_salvate = 0
-            page = 1
-            
-            # Usiamo un ciclo while per gestire l'impaginazione (fino a 200 corse per pagina)
-            while True:
-                url = f"https://www.strava.com/api/v3/athlete/activities?after={after_ts}&before={before_ts}&per_page=200&page={page}"
-                response = requests.get(url, headers=headers)
-                response.raise_for_status()
-                activities = response.json()
-                
-                if not activities:
-                    break # Se la pagina è vuota, abbiamo scaricato tutto
-                    
-                for act in activities:
-                    if act.get('type') == 'Run':
-                        # --- 2. TRADUZIONE DELL'ID NEL NOME REALE ---
-                        gear_id = act.get('gear_id')
-                        nome_scarpa = mappa_scarpe.get(gear_id, 'N/D') if gear_id else 'N/D'
-                        # --------------------------------------------
-                        run_data = {
-                            'id': act['id'],
-                            'name': act['name'],
-                            'distance': act['distance'],
-                            'moving_time': act['moving_time'],
-                            'start_date': act['start_date_local'][:10],
-                            'workout_type': act.get('workout_type', 0),
-                            'scarpe': nome_scarpa
-                        }
-                        # L'ID del documento è l'ID di Strava. merge=True aggiorna i campi se la corsa esiste già!
-                        db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
-                        corse_salvate += 1
-                
-                page += 1
-            
-            print(f"✅ [STRAVA] Sync {year} completato: {corse_salvate} corse elaborate (nuove o aggiornate).")
-            return corse_salvate
-        except Exception as e:
-            print(f"❌ [STRAVA] Errore durante il sync dell'anno {year}: {e}")
-            return 0
-
-    def sync_latest_activities(self, db_instance, limit=30):
-        """Sync leggero e veloce delle ultime N attività per aggiornare modifiche recenti"""
-        try:
-            token = self.get_access_token()
-            headers = {'Authorization': f'Bearer {token}'}
-            
-            # --- 1. CREAZIONE DELLA MAPPA SCARPE ---
-            scarpe_atleta = self.fetch_athlete_shoes()
-            mappa_scarpe = {}
-            if scarpe_atleta:
-                for scarpa in scarpe_atleta:
-                    mappa_scarpe[scarpa['id']] = scarpa.get('name', 'Scarpa')
-            # ---------------------------------------
-
-            url = f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}"
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             activities = response.json()
             
-            for act in activities:
-                if act.get('type') == 'Run':
-                    # --- 2. TRADUZIONE DELL'ID NEL NOME REALE ---
-                    gear_id = act.get('gear_id')
-                    nome_scarpa = mappa_scarpe.get(gear_id, 'N/D') if gear_id else 'N/D'
-                    # --------------------------------------------
-                    run_data = {
-                        'id': act['id'],
-                        'name': act['name'],
-                        'distance': act['distance'],
-                        'moving_time': act['moving_time'],
-                        'start_date': act['start_date_local'][:10],
-                        'workout_type': act.get('workout_type', 0),
-                        'scarpe': nome_scarpa
-                    }
-                    db_instance.db.collection("activities").document(str(act['id'])).set(run_data, merge=True)
-            return True
-        except Exception as e:
-            print(f"⚠️ [STRAVA] Mini-sync fallito: {e}")
-            return False
+            runs = [act for act in activities if act.get('type') == 'Run']
+            if not runs:
+                return [], 0, None, None
+                
+            ultima_corsa = runs[0]
+            data_str = ultima_corsa['start_date_local'].replace('Z', '+00:00')
+            run_date = datetime.fromisoformat(data_str)
+            
+            start_of_week = run_date - timedelta(days=run_date.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            
+            settimana_attiva = []
+            km_totali = 0
+            
+            for run in runs:
+                r_date = datetime.fromisoformat(run['start_date_local'].replace('Z', '+00:00'))
+                if start_of_week <= r_date <= end_of_week:
+                    settimana_attiva.append({
+                        "id": run.get("id"),
+                        "nome": run.get("name"),
+                        "distanza": run.get("distance", 0) / 1000,
+                        "data": r_date.strftime("%d/%m/%Y"),
+                        "start_date": run.get("start_date_local"),
+                        "workout_type": run.get("workout_type")
+                    })
+                    km_totali += run.get("distance", 0) / 1000
+                    
+            settimana_attiva.reverse()
+            return settimana_attiva, km_totali, start_of_week, end_of_week
 
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Errore nel recupero della settimana attiva retroattiva: {e}")
+            return [], 0, None, None
+
+# Istanziazione globale usata in webhook.py
 strava_client = StravaClient()
