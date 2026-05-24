@@ -6,9 +6,19 @@ import io
 import json
 import google.genai.types as types
 
+# Importiamo i nostri prompt come costanti
+from .prompts import (
+    PROMPT_CHAT_SISTEMA,
+    PROMPT_RECENT_PERFORMANCE,
+    PROMPT_REPORT_SETTIMANALE,
+    PROMPT_ANALISI_CORSA,
+    PROMPT_ANALISI_SCARPA,
+    PROMPT_OCR_BILANCIA
+)
+
 class RunningAnalyst:
     def __init__(self):
-        # 1. Recupera la API Key (da .env o Secret Manager)
+        # 1. Recupera la API Key
         api_key = config.get_secret("GEMINI_API_KEY")
         
         if not api_key:
@@ -23,11 +33,10 @@ class RunningAnalyst:
     def chat_with_strava_context(self, chat_id, user_text):
         """Gestisce una conversazione fluida iniettando lo storico allenamenti come system instruction"""
         try:
-            # 1. Recupero dinamico di uno storico più ampio (es. ultime 40 corse)
+            # 1. Recupero dinamico
             recent_runs = db.get_recent_runs(limit=100)
             
             if recent_runs:
-                # Creiamo una lista compatta per dare molto contesto senza sprecare token
                 storico_compatto = []
                 strava_workout_types = {
                     0: "Recupero/Base",
@@ -42,7 +51,6 @@ class RunningAnalyst:
                     distanza_km = run.get('distance', 0) / 1000
                     tempo_min = run.get('moving_time', 0) // 60
                     
-                    # Creiamo una riga sintetica per ogni allenamento
                     riga = f"- {run.get('start_date', 'N/D')}: {run.get('name', 'Corsa')} | Tipo: {tipo_corsa} | {distanza_km:.1f}km in {tempo_min}m | Scarpa: {run.get('scarpe', 'N/D')}"
                     storico_compatto.append(riga)
                 
@@ -50,17 +58,8 @@ class RunningAnalyst:
             else:
                 activity_context = "Nessun allenamento recente trovato nel database."
 
-            # 2. Configurazione della System Instruction dinamica (Contesto invisibile espanso)
-            full_system_instruction = (
-                "Sei 'my_running_agent', un assistente virtuale e coach esperto per la corsa. "
-                "Interagisci in modo cordiale, motivante, tecnico ma accessibile. "
-                "L'utente si allena 2-3 volte a settimana per preparare distanze di 10km e mezze maratone. "
-                "Ecco l'elenco delle sue ultime attività da usare come contesto invisibile per rispondere alle sue domande:\n"
-                f"{activity_context}\n\n"
-                "Usa questi dati per rispondere a domande storiche (es. 'quante gare ho fatto quest'anno?', 'come sono andati gli ultimi lunghi?'). "
-                "Fai riferimento a questi dati per dare contestualizzazione ai suoi progressi. "
-                "Rispondi usando la formattazione HTML consentita da Telegram (<b>, <i>)."
-            )
+            # 2. Configurazione della System Instruction dinamica formattata dal prompt pulito
+            full_system_instruction = PROMPT_CHAT_SISTEMA.format(activity_context=activity_context)
 
             # 3. Lettura dello stato precedente da Firestore
             contents, history_dicts = db.get_chat_history(chat_id)
@@ -73,19 +72,19 @@ class RunningAnalyst:
                 )
             )
 
-            # 5. Configurazione della chiamata all'SDK
-            config = genai.types.GenerateContentConfig(
+            # 5. Configurazione della chiamata all'SDK (usiamo gen_config per non sovrascrivere l'import config)
+            gen_config = genai.types.GenerateContentConfig(
                 system_instruction=full_system_instruction,
                 temperature=0.7
             )
 
             print(f"🧠 [ANALYST] Invio sessione chat a {self.model_id} (History size: {len(contents)})")
             
-            # Eseguiamo la chiamata stateless
+            # Eseguiamo la chiamata
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=contents,
-                config=config
+                config=gen_config
             )
             bot_reply = response.text
 
@@ -111,14 +110,7 @@ class RunningAnalyst:
             for r in running_data
         ])
 
-        prompt = f"""
-        Sei un coach di corsa esperto. Analizza queste ultime attività e fornisci un feedback 
-        tecnico, motivante e sintetico (max 120 parole). 
-        Punta l'attenzione sulla costanza e sul ritmo.
-        
-        ATTIVITÀ RECENTI:
-        {stats}
-        """
+        prompt = PROMPT_RECENT_PERFORMANCE.format(stats=stats)
 
         try:
             response = self.client.models.generate_content(
@@ -131,38 +123,19 @@ class RunningAnalyst:
 
     def analyze_weekly_summary(self, lista_corse, km_totali):
         """Genera un'analisi aggregata per la settimana in corso"""
-        
         if not lista_corse:
             return "Nessuna corsa registrata questa settimana. Ottimo momento per pianificare la prossima uscita!"
 
-        # Formatta la lista delle corse per il prompt
+        # Formatta la lista delle corse
         dettagli_corse = "\n".join([
             f"- {r['data']}: {r['nome']} ({r['distanza']} km)"
             for r in lista_corse
         ])
 
-        prompt = f"""
-        Agisci come il mio coach personale di corsa.
-        Ecco i dati aggregati degli allenamenti che ho fatto questa settimana (da lunedì a oggi):
-        
-        - Chilometri totali: {km_totali} km
-        - Corse effettuate:
-        {dettagli_corse}
-
-        Il mio regime abituale prevede 2 o 3 allenamenti a settimana, focalizzati su distanze tra i 10km e la mezza maratona.
-        
-        Compiti:
-        1. Fornisci un riassunto motivazionale e tecnico sul volume di allenamento della settimana, valutando se il carico è adeguato (max 100 parole).
-        2. Cerca elementi in cui non sono andato bene, sii molto onesto e duro se serve e cerca di darmi consigli reali e pratici su come poter migliorare
-        3. Elenca le singole corse in modo pulito e ordinato.
-        
-        REGOLE DI FORMATTAZIONE (CRITICHE):
-        - Usa ESCLUSIVAMENTE i tag <b>testo</b> per il grassetto e <i>testo</i> per il corsivo.
-        - Per gli elenchi, usa semplici trattini (-) o punti (•) testuali.
-        - NON usare tag come <ul>, <li>, <p>, <html>, <body> o <div>.
-        - NON includere il blocco di codice markdown (niente ```html all'inizio o alla fine).
-        - Restituisci solo il testo pulito pronto per essere inviato.
-        """
+        prompt = PROMPT_REPORT_SETTIMANALE.format(
+            km_totali=km_totali,
+            dettagli_corse=dettagli_corse
+        )
 
         try:
             response = self.client.models.generate_content(
@@ -175,19 +148,16 @@ class RunningAnalyst:
         
     def analyze_single_run(self, dati_corsa):
         """Genera un'analisi profonda di una singola corsa confrontando target e realtà"""
-        
         if not dati_corsa:
             return "Nessun dato disponibile per questa attività."
 
-        # 1. Preparazione dei Lap (Convertiamo i m/s in min/km se disponibili)
+        # 1. Preparazione dei Lap
         laps_info = "Dati lap non disponibili."
         if dati_corsa.get('laps'):
             laps_str_list = []
-            # Prendiamo i primi 15 lap per non sovraccaricare il prompt
             for i, lap in enumerate(dati_corsa['laps'][:15]):
                 passo_lap_ms = lap.get('average_speed', 0)
                 if passo_lap_ms > 0:
-                    # Formula di conversione da m/s a min/km
                     pace_min_km = 16.6667 / passo_lap_ms
                     mins = int(pace_min_km)
                     secs = int((pace_min_km - mins) * 60)
@@ -197,7 +167,7 @@ class RunningAnalyst:
                 laps_str_list.append(f"Km {i+1}: {pace_str}")
             laps_info = " | ".join(laps_str_list)
 
-        # 2. Conversione Passo Medio Totale (da m/s a min/km)
+        # 2. Conversione Passo Medio Totale
         passo_medio_ms = dati_corsa.get('passo_medio', 0)
         if passo_medio_ms > 0:
             pace_min_km = 16.6667 / passo_medio_ms
@@ -212,40 +182,18 @@ class RunningAnalyst:
         if not note:
             note = "Nessun obiettivo o struttura specificata nelle note private."
 
-        # 4. Prompt Ingegnerizzato per l'Analisi Dettagliata
-        prompt = f"""
-        Agisci come il mio coach di corsa e analista dati sportivo.
-        Valuta questa singola sessione confrontando le mie note private (l'obiettivo dell'allenamento) con i dati reali registrati.
-        
-        DATI DELLA CORSA A CONSUNTIVO:
-        - Nome: {dati_corsa['nome']}
-        - Distanza: {dati_corsa['distanza']:.2f} km
-        - Tempo in movimento: {dati_corsa['tempo_movimento']:.1f} min
-        - Passo Medio: {passo_medio_str}
-        - Battiti Medi: {dati_corsa['bpm_medi']} bpm
-        - Dislivello: {dati_corsa['dislivello']} m
-        - Scarpe utilizzate: {dati_corsa['scarpe']}
-        
-        DATI A PREVENTIVO (STRUTTURA/OBIETTIVO):
-        "{note}"
-        
-        ANDAMENTO DEL PASSO PER KM:
-        {laps_info}
-        
-        COMPITI ANALITICI:
-        1. Esegui un'analisi degli scostamenti: ho rispettato quanto scritto nelle note private? (Es. se l'obiettivo era 1 minuto veloce / 1 lento, i lap riflettono variazioni di ritmo coerenti?).
-        2. Valuta il dispendio energetico (passo e BPM) e controlla se la scarpa registrata è adeguata al tipo di lavoro svolto, tenendo conto delle dinamiche per preparare una mezza maratona.
-        3. Scrivi un responso tecnico e netto (max 150 parole)
-        4. Cerca elementi in cui non sono andato bene, sii molto onesto e duro se serve e cerca di darmi consigli reali e pratici su come poter migliorare (max 150 parole).
-        
-        REGOLE DI FORMATTAZIONE PER TELEGRAM:
-        - Formatta in HTML (usa SOLO i tag <b> per grassetto e <i> per corsivo).
-        - NON usare Markdown (no **, no #).
-        - NON inserire tag di blocco come <html>, <body>, <p>, <ul> o <li>.
-        - Usa il trattino testuale (-) per eventuali elenchi.
-        - NON inserire blocchi di codice testuali (no ```html).
-        - Restituisci esclusivamente il testo formattato pronto per l'invio.
-        """
+        # 4. Compilazione del prompt usando le chiavi estratte in strava_client.py
+        prompt = PROMPT_ANALISI_CORSA.format(
+            nome=dati_corsa['nome'],
+            distanza=dati_corsa['distanza'],
+            tempo_movimento=dati_corsa['tempo_movimento'],
+            passo_medio_str=passo_medio_str,
+            bpm_medi=dati_corsa['bpm_medi'],
+            dislivello=dati_corsa['dislivello'],
+            scarpe=dati_corsa['scarpe'],
+            note=note,
+            laps_info=laps_info
+        )
 
         try:
             response = self.client.models.generate_content(
@@ -263,35 +211,16 @@ class RunningAnalyst:
         model_name = gear_details.get('model_name', 'Sconosciuto')
         km_attuali = gear_details.get('distance', 0) / 1000
         
-        # Formattiamo il dato del peso in base alla presenza o meno nel database
         peso_info = f"{peso_atleta} kg" if peso_atleta else "N/D (considera un peso medio di 70-75 kg)"
 
-        prompt = f"""
-        Analizza tecnicamente la seguente scarpa da running e il suo stato di usura:
-        - Nome in Strava: {nome}
-        - Marca: {brand}
-        - Modello: {model_name}
-        - Chilometri attuali: {km_attuali:.2f} km
-        - Superficie di utilizzo: ESCLUSIVAMENTE SU STRADA (asfalto)
-        - Peso dell'atleta: {peso_info}
-        - Altezza dell'atleta: 177 cm
+        prompt = PROMPT_ANALISI_SCARPA.format(
+            nome=nome,
+            brand=brand,
+            model_name=model_name,
+            km_attuali=km_attuali,
+            peso_info=peso_info
+        )
 
-        L'atleta la utilizza principalmente per allenamenti e gare su distanze di 10km e mezze maratone (21km).
-        
-        Struttura la risposta in modo chiaro:
-        1. Fai un breve focus tecnico sul modello (es. tipo di schiuma PEBA/EVA, drop, presenza di piastre, reattività).
-        2. Indica qual è la durata media o "lifespan" (in km) per questa scarpa tenendo esplicitamente conto dell'impatto ripetuto sull'asfalto e delle precise caratteristiche fisiche dell'atleta.
-        3. Confronta i km attuali con la durata media. Considerando l'abrasione da strada e il peso specifico, la scarpa è ancora nel suo "sweet spot" o la schiuma si sta comprimendo in modo irreversibile?
-        4. Dai un verdetto finale: è ora di iniziare a cercare la sostituta?
-
-        REGOLE DI FORMATTAZIONE PER TELEGRAM:
-        - Formatta in HTML (usa SOLO i tag <b> per grassetto e <i> per corsivo).
-        - NON usare Markdown (no **, no #).
-        - NON inserire tag di blocco come <html>, <body>, <p>, <ul> o <li>.
-        - Usa il trattino testuale (-) per eventuali elenchi.
-        - NON inserire blocchi di codice testuali (no ```html).
-        - Restituisci esclusivamente il testo formattato pronto per l'invio.
-        """
         try:
             risposta = self.client.models.generate_content(
                 model=self.model_id,
@@ -307,31 +236,12 @@ class RunningAnalyst:
         try:
             image = PIL.Image.open(io.BytesIO(image_bytes))
             
-            prompt = """Agisci come un analista di dati ed estrai le metriche corporee dallo screenshot di questa applicazione fitness.
-
-            Istruzioni:
-            Analizza l'immagine e individua i valori numerici associati alle diverse metriche del corpo.
-            Estrai la data in cui è stata effettuata la misurazione (si trova solitamente in basso).
-            Ignora gli elementi di navigazione (come "Anno", "Mese", "Aggiungi una pesata", ecc.).
-            Restituisci il risultato ESCLUSIVAMENTE in un formato JSON valido, utilizzando esattamente le chiavi elencate di seguito. Non aggiungere testo o commenti prima o dopo il JSON.
-
-            Chiavi JSON da utilizzare e formato richiesto:
-            "data": (stringa, formato "Giorno GG Mese AAAA")
-            "peso_kg": (numero decimale, usa il punto per i decimali)
-            "imc": (numero decimale)
-            "massa_grassa_percentuale": (numero decimale)
-            "massa_muscolare_percentuale": (numero decimale)
-            "massa_ossea_percentuale": (numero decimale)
-            "massa_idrica_percentuale": (numero decimale)"""
-            
             print("🧠 [ANALYST] Invio screenshot a Gemini Flash per estrazione JSON...")
-            # CORRETTO: Adesso passiamo esplicitamente model e contents
             response = self.client.models.generate_content(
                 model=self.model_id,
-                contents=[prompt, image]
+                contents=[PROMPT_OCR_BILANCIA, image]
             )
             
-            # Gemini potrebbe aggiungere la formattazione markdown (```json ... ```), quindi la ripuliamo
             json_text = response.text.strip()
             if json_text.startswith("```json"):
                 json_text = json_text[7:]
@@ -343,7 +253,6 @@ class RunningAnalyst:
             json_text = json_text.strip()
             
             try:
-                # Trasformiamo la stringa JSON in un dizionario Python
                 dati_corporei = json.loads(json_text)
                 print(f"✅ [ANALYST] Metriche estratte: {dati_corporei}")
                 return dati_corporei
