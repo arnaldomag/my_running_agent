@@ -19,4 +19,4 @@ COPY . .
 EXPOSE 8080
 
 # Comando per avviare il server web con Gunicorn (invece dello script singolo)
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "webhook:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "0", "webhook:app"]
