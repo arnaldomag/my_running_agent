@@ -7,6 +7,10 @@ class RunningDB:
     def __init__(self):
         self.db = firestore.Client(project=config.project_id, database="my-running-agent")
         self.collection_name = "activities"
+
+    # ==========================================
+    # 1. GESTIONE CRONOLOGIA AI (CHAT)
+    # ==========================================
     def get_chat_history(self, chat_id):
         """Recupera la cronologia dei messaggi e la converte in oggetti Content dell'SDK"""
         try:
@@ -17,12 +21,9 @@ class RunningDB:
             if doc.exists:
                 history_dicts = doc.to_dict().get("history", [])
                 
-            # Convertiamo i dizionari piatti in oggetti genai.types.Content richiesti dall'SDK unificato
             contents = []
             for msg in history_dicts:
-                # Gestione di sicurezza sulla struttura delle parti
                 text_part = msg["parts"][0] if isinstance(msg["parts"], list) else msg["parts"]
-                
                 content_obj = genai.types.Content(
                     role=msg["role"],
                     parts=[genai.types.Part.from_text(text=text_part)]
@@ -39,66 +40,61 @@ class RunningDB:
         try:
             doc_ref = self.db.collection("ai_chats").document(str(chat_id))
             
-            # Appendiamo i nuovi messaggi alla lista dei dizionari esistenti
             history_dicts.append({"role": "user", "parts": [user_text]})
             history_dicts.append({"role": "model", "parts": [bot_reply]})
             
-            # Applichiamo il limite massimo della rolling window (10 messaggi = 5 interazioni complete)
             MAX_HISTORY_LENGTH = 10
             if len(history_dicts) > MAX_HISTORY_LENGTH:
                 history_dicts = history_dicts[-MAX_HISTORY_LENGTH:]
                 
-            # Scrittura atomica su Firestore
             doc_ref.set({
-                "last_updated": datetime.now(timezone.utc),
+                "last_updated": firestore.SERVER_TIMESTAMP,
                 "history": history_dicts
             }, merge=True)
             
-            print(f"💾 [DATABASE] Cronologia chat aggiornata per chat_id: {chat_id}")
             return True
         except Exception as e:
             print(f"❌ [DATABASE] Errore nel salvataggio della cronologia chat: {e}")
             return False
-    
+
     def run_test_write(self):
-        """Funzione di test per verificare la scrittura"""
         doc_ref = self.db.collection('health_checks').document('current')
-        # Usiamo il timestamp del server di Google
         doc_ref.set({
             "status": "healthy",
             "last_check": firestore.SERVER_TIMESTAMP 
         })
         return True
 
+    # ==========================================
+    # 2. GESTIONE ATTIVITÀ STRAVA (ETL)
+    # ==========================================
     def update_activity(self, activity_data):
-        """Salva o aggiorna un'attività usando l'ID di Strava"""
         activity_id = str(activity_data.get('id'))
         if not activity_id:
             print("❌ Impossibile salvare: ID attività mancante.")
             return
         
         doc_ref = self.db.collection(self.collection_name).document(activity_id)
-        # set con merge=True evita di sovrascrivere dati esistenti se ne aggiungiamo di nuovi
         doc_ref.set(activity_data, merge=True)
         print(f"✅ Attività {activity_id} sincronizzata su Firestore.")
 
     def get_recent_runs(self, limit=10):
-        """Recupera le ultime corse salvate"""
         docs = self.db.collection(self.collection_name)\
                       .order_by("start_date", direction=firestore.Query.DESCENDING)\
                       .limit(limit).stream()
         return [doc.to_dict() for doc in docs]
 
+    # ==========================================
+    # 3. GESTIONE METRICHE CORPOREE (BILANCIA)
+    # ==========================================
     def save_body_metrics(self, metrics_data):
-        """Salva le metriche corporee su Firestore nella collezione 'metrics'"""
         try:
-            # Crea un ID documento pulito partendo dalla data (es: "sabato_16_maggio_2026")
             doc_id = metrics_data.get("data", "data_sconosciuta").replace(" ", "_").lower()
-            
-            # Riferimento alla collezione 'metrics' su Firestore
             doc_ref = self.db.collection("metrics").document(doc_id)
             
-            # Inseriamo i dati
+            # AGGIUNTA CRITICA: Inseriamo il timestamp del server per poter estrarre l'ultimo peso!
+            metrics_data["timestamp"] = firestore.SERVER_TIMESTAMP
+            
             doc_ref.set(metrics_data)
             print(f"✅ [DATABASE] Metriche salvate su Firestore con ID Doc: {doc_id}")
             return True
@@ -107,66 +103,49 @@ class RunningDB:
             return False
 
     def get_latest_weight(self):
-        """Recupera il peso corporeo più recente salvato in Firestore"""
+        """Recupera il peso corporeo in modo rigidamente cronologico"""
         try:
-            # Recuperiamo un documento dalla collezione metrics
-            docs = self.db.collection("metrics").limit(1).get()
+            # 1. Tentativo con ordine decrescente (funziona per i nuovi record salvati con il timestamp)
+            docs = self.db.collection("metrics").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(1).get()
             for doc in docs:
-                data = doc.to_dict()
-                return data.get("peso_kg")
+                return doc.to_dict().get("peso_kg")
+                
+            # 2. Fallback per i vecchi record (senza timestamp, estrae il primo disponibile)
+            docs_fallback = self.db.collection("metrics").limit(1).get()
+            for doc in docs_fallback:
+                return doc.to_dict().get("peso_kg")
+                
             return None
         except Exception as e:
             print(f"❌ [DATABASE] Errore nel recupero del peso: {e}")
             return None
 
+    # ==========================================
+    # 4. GESTIONE PIANIFICAZIONE SETTIMANALE
+    # ==========================================
     def get_current_week_id(self):
-        """Calcola l'ID univoco per la settimana in corso (es: '2026_W21')"""
         oggi = date.today()
         anno, settimana, giorno_settimana = oggi.isocalendar()
         return f"{anno}_W{settimana}"
 
     def save_weekly_plan_structured(self, sessions_list):
-        """Salva il piano strutturato a sessioni su Firestore"""
         try:
             week_id = self.get_current_week_id()
             doc_ref = self.db.collection("training_plans").document(week_id)
             
             plan_data = {
                 "week_id": week_id,
-                "last_modified": datetime.now(timezone.utc),
+                "last_modified": firestore.SERVER_TIMESTAMP,
                 "sessions": sessions_list
             }
             
             doc_ref.set(plan_data)
-            print(f"💾 [DATABASE] Piano strutturato salvato per la settimana {week_id}")
             return True
         except Exception as e:
             print(f"❌ [DATABASE] Errore nel salvataggio del piano strutturato: {e}")
             return False
 
-    def mark_session_as_done(self, session_id):
-        """Trova una sessione specifica per ID all'interno dell'array e la segna come completata"""
-        try:
-            week_id = self.get_current_week_id()
-            doc_ref = self.db.collection("training_plans").document(week_id)
-            doc = doc_ref.get()
-            
-            if doc.exists:
-                data = doc.to_dict()
-                for s in data.get("sessions", []):
-                    if str(s["id"]) == str(session_id):
-                        s["status"] = "done"
-                        break
-                
-                doc_ref.set(data)
-                return True
-            return False
-        except Exception as e:
-            print(f"❌ [DATABASE] Errore nel completamento della sessione: {e}")
-            return False
-
     def get_weekly_plan(self):
-        """Recupera il piano della settimana in corso"""
         try:
             week_id = self.get_current_week_id()
             doc = self.db.collection("training_plans").document(week_id).get()
@@ -177,76 +156,62 @@ class RunningDB:
             print(f"❌ [DATABASE] Errore recupero piano: {e}")
             return None
 
-    def delete_session(self, session_id):
-        """Elimina una specifica sessione dall'array del piano settimanale"""
+    # --- METODO PRIVATO UNIFICATO PER MODIFICARE LE SESSIONI (DRY PRINCIPLE) ---
+    def _update_session_action(self, session_id, action, nuovi_step=None):
+        """Motore centrale che esegue tutte le operazioni (done, reopen, edit, delete) su una sessione"""
         try:
             week_id = self.get_current_week_id()
             doc_ref = self.db.collection("training_plans").document(week_id)
             doc = doc_ref.get()
             
-            if doc.exists:
-                data = doc.to_dict()
-                sessioni_originali = data.get("sessions", [])
+            if not doc.exists:
+                return False
                 
-                # Ricreiamo la lista tenendo tutto tranne la sessione con l'ID indicato
-                sessioni_aggiornate = [s for s in sessioni_originali if str(s["id"]) != str(session_id)]
-                
-                # Se la lunghezza è diminuita, significa che l'abbiamo trovata e rimossa
-                if len(sessioni_aggiornate) < len(sessioni_originali):
-                    data["sessions"] = sessioni_aggiornate
-                    doc_ref.set(data)
-                    return True
-            return False
-        except Exception as e:
-            print(f"❌ [DATABASE] Errore nell'eliminazione della sessione: {e}")
-            return False
-
-    def edit_session(self, session_id, nuovi_step):
-        """Sostituisce gli step di una sessione esistente e la riporta a 'todo' (attiva)"""
-        try:
-            week_id = self.get_current_week_id()
-            doc_ref = self.db.collection("training_plans").document(week_id)
-            doc = doc_ref.get()
+            data = doc.to_dict()
+            sessioni = data.get("sessions", [])
+            aggiornato = False
             
-            if doc.exists:
-                data = doc.to_dict()
-                aggiornato = False
-                
-                for s in data.get("sessions", []):
+            if action == "delete":
+                # Filtra via la sessione da eliminare
+                sessioni_filtrate = [s for s in sessioni if str(s["id"]) != str(session_id)]
+                if len(sessioni_filtrate) < len(sessioni):
+                    data["sessions"] = sessioni_filtrate
+                    aggiornato = True
+            else:
+                # Modifica la sessione trovata
+                for s in sessioni:
                     if str(s["id"]) == str(session_id):
-                        s["steps"] = nuovi_step
-                        s["status"] = "todo"  # Ripristina lo stato ad attivo così puoi rigestirla
+                        if action == "done":
+                            s["status"] = "done"
+                        elif action == "reopen":
+                            s["status"] = "todo"
+                        elif action == "edit":
+                            s["status"] = "todo"
+                            s["steps"] = nuovi_step
                         aggiornato = True
                         break
-                
-                if aggiornato:
-                    doc_ref.set(data)
-                    return True
-            return False
-        except Exception as e:
-            print(f"❌ [DATABASE] Errore nella modifica della sessione: {e}")
-            return False
-
-    def reopen_session(self, session_id):
-        """Riporta una sessione completata (done) allo stato attivo (todo)"""
-        try:
-            week_id = self.get_current_week_id()
-            doc_ref = self.db.collection("training_plans").document(week_id)
-            doc = doc_ref.get()
             
-            if doc.exists:
-                data = doc.to_dict()
-                for s in data.get("sessions", []):
-                    if str(s["id"]) == str(session_id):
-                        s["status"] = "todo"
-                        break
-                
+            if aggiornato:
                 doc_ref.set(data)
                 return True
             return False
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nella riapertura della sessione: {e}")
+            print(f"❌ [DATABASE] Errore nell'operazione '{action}' sulla sessione {session_id}: {e}")
             return False
 
-# Istanza pronta all'uso
+    # --- LE 4 FUNZIONI PUBBLICHE DIVENTATE MONORIGA GRAZIE AL METODO UNIFICATO ---
+    
+    def mark_session_as_done(self, session_id):
+        return self._update_session_action(session_id, action="done")
+
+    def reopen_session(self, session_id):
+        return self._update_session_action(session_id, action="reopen")
+
+    def edit_session(self, session_id, nuovi_step):
+        return self._update_session_action(session_id, action="edit", nuovi_step=nuovi_step)
+
+    def delete_session(self, session_id):
+        return self._update_session_action(session_id, action="delete")
+
+# Istanza pronta all'uso esportata come singleton
 db = RunningDB()
