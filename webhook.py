@@ -77,35 +77,34 @@ def process_fallback_weekly_report():
         notifier.send_message(f"❌ Errore durante il recupero del report di fallback: {e}")
 
 def process_cron_weekly_report():
-    """Report settimanale rigido: analizza ESCLUSIVAMENTE la scorsa settimana di calendario"""
+    """Report settimanale rigido: analizza ESCLUSIVAMENTE la settimana in corso (da Lunedì a Domenica)"""
     try:
         print("⏰ [WEBHOOK] Avvio report settimanale schedulato...")
         
         # 1. Scarichiamo le ultime novità da Strava per allineare Firestore
         strava_client.sync_latest_activities(db, limit=30)
 
-        # 2. Calcoliamo matematicamente i confini esatti della scorsa settimana (da Lunedì a Domenica)
+        # 2. Calcoliamo i confini della SETTIMANA CORRENTE (da Lunedì a Domenica)
         oggi = date.today()
         giorno_settimana = oggi.weekday() # 0=Lunedì, 1=Martedì, ..., 6=Domenica
         
-        # Troviamo il lunedì della settimana passata e la relativa domenica
-        lunedi_scorso = oggi - timedelta(days=giorno_settimana + 7)
-        domenica_scorsa = lunedi_scorso + timedelta(days=6)
+        # Sottraiamo i giorni passati per tornare sempre al lunedì di questa settimana
+        lunedi_corrente = oggi - timedelta(days=giorno_settimana)
+        domenica_corrente = lunedi_corrente + timedelta(days=6)
         
-        str_lunedi = lunedi_scorso.strftime("%Y-%m-%d")
-        str_domenica = domenica_scorsa.strftime("%Y-%m-%d")
+        str_lunedi = lunedi_corrente.strftime("%Y-%m-%d")
+        str_domenica = domenica_corrente.strftime("%Y-%m-%d")
         
-        print(f"📅 [CRON] Analisi intervallo temporale rigido: {str_lunedi} al {str_domenica}")
+        print(f"📅 [CRON] Analisi intervallo settimana in corso: {str_lunedi} al {str_domenica}")
 
-        # 3. Interroghiamo Firestore filtrando direttamente per le date della scorsa settimana
-        # Nota: Assicurati che il nome della collezione sia quello corretto (es. "activities")
+        # 3. Interroghiamo Firestore per le date della settimana in corso
         query_corse = db.db.collection("activities") \
             .where("start_date", ">=", str_lunedi) \
             .where("start_date", "<=", str_domenica) \
             .order_by("start_date", direction="DESCENDING") \
             .get()
 
-        # Creiamo la lista e aggiungiamo le chiavi in italiano per retrocompatibilità con l'Analyst
+        # Adattiamo i campi per renderli compatibili con l'Analista AI
         lista_corse = []
         for doc in query_corse:
             corsa_dict = doc.to_dict()
@@ -115,24 +114,24 @@ def process_cron_weekly_report():
             corsa_dict['tempo'] = corsa_dict.get('moving_time', 0)
             lista_corse.append(corsa_dict)
 
-        # 4. Se l'elenco è vuoto, l'atleta ha riposato nella settimana di riferimento
+        # 4. Se l'elenco è vuoto
         if not lista_corse:
-            print("📭 [CRON] Nessuna attività trovata nella settimana trascorsa.")
-            data_inizio_it = lunedi_scorso.strftime("%d/%m")
-            data_fine_it = domenica_scorsa.strftime("%d/%m")
+            print("📭 [CRON] Nessuna attività trovata nella settimana in corso.")
+            data_inizio_it = lunedi_corrente.strftime("%d/%m")
+            data_fine_it = domenica_corrente.strftime("%d/%m")
             notifier.send_message(
                 f"📭 <b>Report Settimanale ({data_inizio_it} - {data_fine_it})</b>\n\n"
-                "Non ho trovato nessuna attività registrata in questa settimana. Goditi il riposo, ma non dimenticare il piano! 🏃‍♂️"
+                "Non ho trovato nessuna attività registrata in questa settimana. Ricordati di aggiornare il piano! 🏃‍♂️"
             )
             return
 
-        # 5. Se ci sono corse, calcoliamo i km totali e inviamo tutto a Gemini
+        # 5. Se ci sono corse, calcoliamo i km totali e inviamo a Gemini
         km_totali = sum([c.get('distance', 0) for c in lista_corse]) / 1000
         
-        data_inizio_it = lunedi_scorso.strftime("%d/%m")
-        data_fine_it = domenica_scorsa.strftime("%d/%m")
+        data_inizio_it = lunedi_corrente.strftime("%d/%m")
+        data_fine_it = domenica_corrente.strftime("%d/%m")
 
-        notifier.send_message(f"🤖 Elaborazione del report per la settimana {data_inizio_it} - {data_fine_it}...")
+        notifier.send_message(f"🤖 Elaborazione del report parziale per la settimana {data_inizio_it} - {data_fine_it}...")
         feedback_raw = analyst.analyze_weekly_summary(lista_corse, km_totali)
         
         feedback_settimanale = feedback_raw.replace("```html", "").replace("```", "").strip()
@@ -148,7 +147,7 @@ def process_cron_weekly_report():
             
         tastiera_inline = {"inline_keyboard": bottoni} if bottoni else None
         notifier.send_message(messaggio_telegram, reply_markup=tastiera_inline)
-        print("✅ [WEBHOOK] Report cron basato su intervallo reale inviato.")
+        print("✅ [WEBHOOK] Report cron sulla settimana in corso inviato.")
         
     except Exception as e:
         print(f"❌ [WEBHOOK] Errore in process_cron_weekly_report: {e}")
