@@ -1,4 +1,5 @@
 import requests
+import json
 from .config import config
 
 class TelegramNotifier:
@@ -19,12 +20,13 @@ class TelegramNotifier:
             "parse_mode": "HTML"
         }
         
-        # Se passiamo dei bottoni, li aggiungiamo al payload
+        # OTTIMIZZAZIONE: Convertiamo il dizionario in stringa JSON esplicita per evitare 
+        # rari errori 400 "Bad Request" dall'API di Telegram sui bottoni inline
         if reply_markup:
-            payload["reply_markup"] = reply_markup
+            payload["reply_markup"] = json.dumps(reply_markup)
 
         try:
-            response = requests.post(self.api_url, json=payload)
+            response = requests.post(self.api_url, data=payload) # Usiamo data invece di json per gestire la stringa
             response.raise_for_status() 
             return True
         except requests.exceptions.RequestException as e:
