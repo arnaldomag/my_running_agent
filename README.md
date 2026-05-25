@@ -73,9 +73,6 @@ Il progetto è strutturato seguendo il solido pattern **Controller-Service** per
 ## 🚀 Deployment (Google Cloud Platform)
 ​Questo progetto è configurato per girare interamente serverless su GCP:
 * **Cloud Run**: Esegue ed espone gli endpoint Flask (/telegram-webhook, /tasks/weekly-report).
-​
-* **Firestore**: Database NoSQL utilizzato come single source of truth per memorizzare stato, sessioni e storico.
-​
+* ​**Firestore**: Database NoSQL utilizzato come single source of truth per memorizzare stato, sessioni e storico.
 * **Secret Manager**: Protegge token e chiavi (TELEGRAM_TOKEN, STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_REFRESH_TOKEN, GEMINI_API_KEY).
-​
 * **Cloud Scheduler**: Job Cron automatizzato che triggera il report settimanale ogni domenica alle 20:00 (stringa cron: 0 20 * * 0).
