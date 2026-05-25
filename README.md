@@ -70,7 +70,7 @@ Il progetto è strutturato seguendo il solido pattern **Controller-Service** per
 └── README.md                # Questo file
 
 
-##🚀 Deployment (Google Cloud Platform)
+## 🚀 Deployment (Google Cloud Platform)
 ​Questo progetto è configurato per girare interamente serverless su GCP:
 ​Cloud Run: Esegue ed espone gli endpoint Flask (/telegram-webhook, /tasks/weekly-report).
 ​Firestore: Database NoSQL utilizzato come single source of truth per memorizzare stato, sessioni e storico.
