@@ -64,7 +64,6 @@ Il progetto è strutturato seguendo il solido pattern **Controller-Service** per
 │   ├── archive/             # Codice storicizzato / vecchi esperimenti
 │   ├── bonifiche/           # Script di utilità per pulizia dati storici (ETL batch)
 │   └── liste/               # Script di data profiling in sola lettura
-├── check_models.py          # Utility di verifica dei modelli LLM disponibili
 ├── main.py                  # Entry point WSGI/Gunicorn
 ├── webhook.py               # Entry point Flask (Route API principale)
 └── README.md                # Questo file
