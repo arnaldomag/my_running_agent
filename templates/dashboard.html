@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Running Agent - Dashboard</title>
+    <script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #222222);
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            border: 1px solid var(--tg-theme-hint-color, #ccc);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 50px;
+        }
+        h1 { color: var(--tg-theme-button-color, #2481cc); }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🏃‍♂️ My Running Agent</h1>
+        <p>Dashboard in fase di sviluppo</p>
+        <p>Ciao, <b id="user-name">Atleta</b>! Benvenuto nella tua Mini App.</p>
+    </div>
+
+    <script>
+        // Inizializza l'interfaccia di Telegram
+        const tg = window.Telegram.WebApp;
+        tg.ready(); // Comunica a Telegram che l'app è pronta per essere mostrata
+        tg.expand(); // Espande l'app a schermo intero
+
+        // Estraiamo dinamicamente il nome dell'utente da Telegram (se disponibile)
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            document.getElementById('user-name').innerText = tg.initDataUnsafe.user.first_name;
+        }
+    </script>
+</body>
+</html>

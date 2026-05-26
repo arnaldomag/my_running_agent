@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 
 # Importiamo moduli e servizi
 from app.strava_client import strava_client
@@ -108,6 +108,18 @@ def tasks_weekly_report():
     except Exception as e:
         print(f"❌ [CRON] Errore durante l'esecuzione del cron job: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# ==================================================
+# NEW: ROTTA PER SERVIRE LA TELEGRAM MINI APP
+# ==================================================
+@app.route('/dashboard', methods=['GET'])
+def dashboard_view():
+    try:
+        print("🌐 [WEBHOOK] Richiesta di apertura della Mini App ricevuta.")
+        return render_template('dashboard.html')
+    except Exception as e:
+        print(f"💥 [WEBHOOK] Errore nel caricamento del template della dashboard: {e}")
+        return "Errore interno nel caricamento della dashboard.", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
