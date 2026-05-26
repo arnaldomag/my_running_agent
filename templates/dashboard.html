@@ -12,26 +12,46 @@
             background-color: var(--tg-theme-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #222222);
             margin: 0;
-            padding: 15px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
+
         .header {
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
-        h2 { color: var(--tg-theme-button-color, #2481cc); margin-bottom: 5px; }
+
+        h2 { 
+            color: var(--tg-theme-button-color, #2481cc); 
+            margin: 0 0 8px 0;
+            font-size: 1.4em;
+        }
+
         .weight-badge {
             display: inline-block;
             background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
-            padding: 5px 15px;
+            color: var(--tg-theme-hint-color, #999);
+            padding: 6px 16px;
             border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: bold;
+            font-size: 0.85em;
+            font-weight: 600;
         }
+
+        .chart-card {
+            background-color: var(--tg-theme-bg-color);
+            border: 1px solid var(--tg-theme-secondary-bg-color);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
         .chart-container {
             position: relative;
-            height: 40vh;
+            height: 220px; /* Altezza fissa per garantire stabilità su mobile */
             width: 100%;
-            margin-bottom: 30px;
         }
     </style>
 </head>
@@ -122,8 +142,21 @@
                                 title: { display: true, text: 'Andamento del Passo', color: textColor }
                             },
                             scales: {
+                                x: {
+                                    grid: {
+                                        color: 'rgba(150, 150, 150, 0.1)' // Griglia leggerissima e semitrasparente
+                                    },
+                                    ticks: {
+                                        color: textColor // Colore dinamico Telegram per le date
+                                    }
+                                },
                                 y: {
-                                    reverse: true // IMPORTANTISSIMO: nel passo, un numero PIÙ BASSO è MIGLIORE (più in alto nel grafico)
+                                    grid: {
+                                        color: 'rgba(150, 150, 150, 0.1)'
+                                    },
+                                    ticks: {
+                                        color: textColor // Colore dinamico Telegram per i valori (km/passo)
+                                    }
                                 }
                             }
                         }
