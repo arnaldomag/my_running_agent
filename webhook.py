@@ -121,6 +121,23 @@ def dashboard_view():
         print(f"💥 [WEBHOOK] Errore nel caricamento del template della dashboard: {e}")
         return "Errore interno nel caricamento della dashboard.", 500
 
+# ==================================================
+# API JSON PER I DATI DELLA DASHBOARD
+# ==================================================
+@app.route('/api/metrics', methods=['GET'])
+def api_metrics():
+    try:
+        print("📊 [WEBHOOK] Richiesta API per i dati della dashboard...")
+        dati_json = orchestrator.get_dashboard_metrics()
+        
+        if dati_json.get("status") == "error":
+            return jsonify(dati_json), 500
+            
+        return jsonify(dati_json), 200
+    except Exception as e:
+        print(f"💥 [WEBHOOK] Errore fatale nella rotta API: {e}")
+        return jsonify({"status": "error", "message": "Errore interno del server"}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)

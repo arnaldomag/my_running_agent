@@ -312,6 +312,58 @@ class BotOrchestrator:
             print(f"❌ [ORCHESTRATOR] Errore in process_cron_weekly_report: {e}")
             self.notifier.send_message("❌ Si è verificato un errore tecnico nella generazione del report automatico.")
 
+    def get_dashboard_metrics(self):
+        """Estrae e formatta i dati per popolare i grafici della Mini App"""
+        try:
+            # 1. Recupero le ultime 15 corse dal DB
+            recent_runs = self.db.get_recent_runs(limit=15)
+            
+            # Le API restituiscono in ordine discendente, ma per un grafico temporale 
+            # (da sinistra a destra) ci serve l'ordine cronologico inverso (crescente)
+            recent_runs.reverse() 
+            
+            labels = []
+            km_data = []
+            pace_data = []
+            
+            for run in recent_runs:
+                # Estraiamo solo Mese-Giorno per l'asse X (es. da "2026-05-26" a "05-26")
+                data_corta = run.get('start_date', 'N/D')
+                if len(data_corta) >= 10:
+                    labels.append(data_corta[5:10])
+                else:
+                    labels.append(data_corta)
+                
+                # Asse Y: Distanza in km
+                distanza = run.get('distance', 0) / 1000
+                km_data.append(round(distanza, 2))
+                
+                # Asse Y (secondario): Passo in minuti decimali (es. 5'30" -> 5.50)
+                tempo_sec = run.get('moving_time', 0)
+                dist_km = run.get('distance', 0) / 1000
+                if dist_km > 0:
+                    passo_dec = (tempo_sec / 60) / dist_km
+                else:
+                    passo_dec = 0
+                pace_data.append(round(passo_dec, 2))
+            
+            # 2. Recupero il peso corporeo aggiornato dall'OCR della bilancia
+            peso = self.db.get_latest_weight() or 0
+            
+            # 3. Restituisco il dizionario pronto per essere jsonify-cato
+            return {
+                "status": "success",
+                "data": {
+                    "labels": labels,
+                    "kilometers": km_data,
+                    "paces": pace_data,
+                    "latest_weight": peso
+                }
+            }
+        except Exception as e:
+            print(f"❌ [ORCHESTRATOR] Errore estrazione metriche: {e}")
+            return {"status": "error", "message": str(e)}
+
     def process_fallback_weekly_report(self):
         try:
             print("📅 [ORCHESTRATOR] Avvio recupero settimana di fallback...")
