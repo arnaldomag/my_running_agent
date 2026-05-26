@@ -364,6 +364,73 @@ class BotOrchestrator:
             print(f"❌ [ORCHESTRATOR] Errore estrazione metriche: {e}")
             return {"status": "error", "message": str(e)}
 
+    def get_dashboard_metrics(self):
+        """
+        Estrae le ultime attività da Firestore, calcola le metriche aggregate
+        e prepara il time-series payload per il frontend della Mini App.
+        """
+        try:
+            # 1. Recupero un congruo storico di corse per l'analisi (ultime 15)
+            recent_runs = self.db.get_recent_runs(limit=15)
+            
+            if not recent_runs:
+                return {
+                    "status": "success",
+                    "data": {"labels": [], "kilometers": [], "paces": [], "latest_weight": 0}
+                }
+            
+            # Invertiamo l'ordine per visualizzare il grafico cronologicamente da sinistra a destra
+            recent_runs.reverse()
+            
+            labels = []
+            kilometers = []
+            paces = []
+            
+            for run in recent_runs:
+                # Formattazione Data (MM-DD) per l'etichetta dell'asse X
+                start_date = run.get('start_date', '')
+                if len(start_date) >= 10:
+                    label_data = start_date[5:10] # Estrae "MM-DD"
+                else:
+                    label_data = "Corsa"
+                labels.append(label_data)
+                
+                # Conversione Distanza (da metri a km con 2 decimali)
+                # Controlliamo se il dato è nativo di Strava (distance) o già elaborato (distanza)
+                metri = run.get('distance', run.get('distanza', 0))
+                # Se il dato nel DB era già in km, non dividiamo per 1000
+                km = metri / 1000 if metri > 100 else metri
+                kilometers.append(round(km, 2))
+                
+                # Calcolo del Passo Medio in minuti decimali (es: 5'30" -> 5.5)
+                tempo_sec = run.get('moving_time', run.get('tempo_movimento', 0))
+                # Se il tempo è memorizzato in minuti, lo riportiamo in secondi per il calcolo
+                if tempo_sec < 500 and km > 0: 
+                    tempo_sec = tempo_sec * 60
+                
+                if km > 0:
+                    passo_totale_minuti = (tempo_sec / 60) / km
+                    paces.append(round(passo_totale_minuti, 2))
+                else:
+                    paces.append(0)
+            
+            # 2. Recupero l'ultimo peso registrato tramite OCR della bilancia
+            latest_weight = self.db.get_latest_weight()
+            
+            return {
+                "status": "success",
+                "data": {
+                    "labels": labels,
+                    "kilometers": kilometers,
+                    "paces": paces,
+                    "latest_weight": latest_weight or 0
+                }
+            }
+            
+        except Exception as e:
+            print(f"❌ [ORCHESTRATOR] Errore critico nel calcolo delle metriche dashboard: {e}")
+            return {"status": "error", "message": f"Errore elaborazione dati: {str(e)}"}
+
     def process_fallback_weekly_report(self):
         try:
             print("📅 [ORCHESTRATOR] Avvio recupero settimana di fallback...")
