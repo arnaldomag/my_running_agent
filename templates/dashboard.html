@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Running Agent - Dashboard</title>
-    <script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
-    <script src="[https://cdn.jsdelivr.net/npm/chart.js](https://cdn.jsdelivr.net/npm/chart.js)"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <style>
+        /* --- CSS DAL TASK 2.2 (Temi Telegram e Responsive) --- */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--tg-theme-bg-color, #ffffff);
@@ -17,18 +19,15 @@
             flex-direction: column;
             min-height: 100vh;
         }
-
         .header {
             text-align: center;
             margin-bottom: 24px;
         }
-
         h2 { 
             color: var(--tg-theme-button-color, #2481cc); 
             margin: 0 0 8px 0;
             font-size: 1.4em;
         }
-
         .weight-badge {
             display: inline-block;
             background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
@@ -38,7 +37,6 @@
             font-size: 0.85em;
             font-weight: 600;
         }
-
         .chart-card {
             background-color: var(--tg-theme-bg-color);
             border: 1px solid var(--tg-theme-secondary-bg-color);
@@ -47,10 +45,9 @@
             margin-bottom: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
-
         .chart-container {
             position: relative;
-            height: 220px; /* Altezza fissa per garantire stabilità su mobile */
+            height: 220px;
             width: 100%;
         }
     </style>
@@ -62,110 +59,125 @@
         <div class="weight-badge" id="weight-display">Peso: -- kg</div>
     </div>
 
-    <div class="chart-container">
-        <canvas id="kmChart"></canvas>
+    <div id="loading" style="text-align: center; margin-top: 50px;">
+        <p>⏳ Sincronizzazione allenamenti in corso...</p>
     </div>
 
-    <div class="chart-container">
-        <canvas id="paceChart"></canvas>
+    <div id="charts-wrapper" style="display: none;">
+        <div class="chart-card">
+            <div class="chart-container"><canvas id="kmChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-container"><canvas id="paceChart"></canvas></div>
+        </div>
     </div>
 
     <script>
+        // --- JAVASCRIPT DAL TASK 2.3 (Logica di fetch e render) ---
         const tg = window.Telegram.WebApp;
         tg.ready();
-        tg.expand(); // Espande l'app a schermo intero
+        tg.expand();
 
-        // Configurazione base per i colori tematici di Telegram
-        const textColor = getComputedStyle(document.body).getPropertyValue('--tg-theme-text-color') || '#222';
-        const primaryColor = getComputedStyle(document.body).getPropertyValue('--tg-theme-button-color') || '#2481cc';
-        
-        // Imposta i font predefiniti per Chart.js
-        Chart.defaults.color = textColor;
-        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+        async function loadDashboardData() {
+            try {
+                // Esegue la chiamata API al nostro backend
+                const response = await fetch('/api/metrics');
+                const res = await response.json();
 
-        // Fetch dei dati dal nostro backend
-        fetch('/api/metrics')
-            .then(response => response.json())
-            .then(res => {
-                if(res.status === 'success') {
-                    const data = res.data;
+                if (res.status === 'success') {
+                    // Nasconde il loading e mostra i grafici
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('charts-wrapper').style.display = 'block';
+
+                    // Disegna i grafici passando i dati
+                    renderCharts(res.data);
                     
-                    // Popola il badge del peso
-                    if(data.latest_weight > 0) {
-                        document.getElementById('weight-display').innerText = `Peso Attuale: ${data.latest_weight} kg`;
+                    // Aggiorna il peso se presente
+                    if(res.data.latest_weight > 0) {
+                        document.getElementById('weight-display').innerText = `Peso Attuale: ${res.data.latest_weight} kg`;
                     }
-
-                    // 1. GRAFICO DEI CHILOMETRI (BARRE)
-                    const ctxKm = document.getElementById('kmChart').getContext('2d');
-                    new Chart(ctxKm, {
-                        type: 'bar',
-                        data: {
-                            labels: data.labels,
-                            datasets: [{
-                                label: 'Distanza (km)',
-                                data: data.kilometers,
-                                backgroundColor: primaryColor,
-                                borderRadius: 5
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                title: { display: true, text: 'Volume (ultime 15 corse)', color: textColor }
-                            }
-                        }
-                    });
-
-                    // 2. GRAFICO DEL PASSO (LINEA)
-                    const ctxPace = document.getElementById('paceChart').getContext('2d');
-                    new Chart(ctxPace, {
-                        type: 'line',
-                        data: {
-                            labels: data.labels,
-                            datasets: [{
-                                label: 'Passo (min/km decimale)',
-                                data: data.paces,
-                                borderColor: '#ff9500', // Un bell'arancione per contrasto
-                                backgroundColor: 'rgba(255, 149, 0, 0.2)',
-                                borderWidth: 2,
-                                fill: true,
-                                tension: 0.3 // Rende le curve morbide
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                title: { display: true, text: 'Andamento del Passo', color: textColor }
-                            },
-                            scales: {
-                                x: {
-                                    grid: {
-                                        color: 'rgba(150, 150, 150, 0.1)' // Griglia leggerissima e semitrasparente
-                                    },
-                                    ticks: {
-                                        color: textColor // Colore dinamico Telegram per le date
-                                    }
-                                },
-                                y: {
-                                    grid: {
-                                        color: 'rgba(150, 150, 150, 0.1)'
-                                    },
-                                    ticks: {
-                                        color: textColor // Colore dinamico Telegram per i valori (km/passo)
-                                    }
-                                }
-                            }
-                        }
-                    });
                 } else {
-                    console.error("Errore API:", res.message);
+                    showError("Errore dal server: " + res.message);
                 }
-            })
-            .catch(err => console.error("Errore di rete:", err));
+            } catch (error) {
+                showError("Impossibile connettersi al server. Riprova più tardi.");
+                console.error("Fetch error:", error);
+            }
+        }
+
+        function renderCharts(data) {
+            // Preleva i colori dal tema attuale di Telegram
+            const textColor = getComputedStyle(document.body).getPropertyValue('--tg-theme-text-color') || '#222';
+            const primaryColor = getComputedStyle(document.body).getPropertyValue('--tg-theme-button-color') || '#2481cc';
+            
+            Chart.defaults.color = textColor;
+            Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+
+            // 1. GRAFICO CHILOMETRI
+            new Chart(document.getElementById('kmChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: 'Distanza (km)',
+                        data: data.kilometers,
+                        backgroundColor: primaryColor,
+                        borderRadius: 4
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: 'Volume (ultime 15 corse)', color: textColor }
+                    },
+                    scales: {
+                        x: { grid: { color: 'rgba(150, 150, 150, 0.1)' }, ticks: { color: textColor } },
+                        y: { grid: { color: 'rgba(150, 150, 150, 0.1)' }, ticks: { color: textColor } }
+                    }
+                }
+            });
+
+            // 2. GRAFICO PASSO
+            new Chart(document.getElementById('paceChart'), {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: 'Passo (min/km)',
+                        data: data.paces,
+                        borderColor: '#ff9500',
+                        backgroundColor: 'rgba(255, 149, 0, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: 'Andamento del Passo', color: textColor }
+                    },
+                    scales: { 
+                        x: { grid: { color: 'rgba(150, 150, 150, 0.1)' }, ticks: { color: textColor } },
+                        y: { 
+                            reverse: true, // I passi più veloci (numeri più bassi) vanno in alto
+                            grid: { color: 'rgba(150, 150, 150, 0.1)' },
+                            ticks: { color: textColor }
+                        }
+                    }
+                }
+            });
+        }
+
+        function showError(msg) {
+            document.getElementById('loading').innerHTML = `<p style="color: red;">❌ ${msg}</p>`;
+        }
+
+        // Avvia la sincronizzazione appena la pagina si apre
+        loadDashboardData();
     </script>
 </body>
 </html>
