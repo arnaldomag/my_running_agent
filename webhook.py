@@ -1,17 +1,46 @@
 import os
 from flask import Flask, request, jsonify, render_template
-
 # Importiamo moduli e servizi
 from app.strava_client import strava_client
 from app.analyst import analyst
 from app.telegram_client import notifier
 from app.database import db
 from app.orchestrator import BotOrchestrator
+import hashlib
+from urllib.parse import parse_qsl
+import hmac
 
 app = Flask(__name__)
 
 # Inizializziamo l'orchestratore
 orchestrator = BotOrchestrator(db, strava_client, analyst, notifier)
+
+# --- LOGICA DI VALIDAZIONE TELEGRAM ---
+def verify_telegram_data(init_data_str):
+    """Verifica l'autenticità del payload di Telegram tramite HMAC-SHA256"""
+    bot_token = os.environ.get("TELEGRAM_TOKEN")
+    if not bot_token or not init_data_str:
+        return False
+        
+    try:
+        parsed_data = dict(parse_qsl(init_data_str))
+        if "hash" not in parsed_data:
+            return False
+            
+        received_hash = parsed_data.pop("hash")
+        
+        # Le specifiche di Telegram richiedono l'ordinamento alfabetico delle chiavi
+        sorted_items = sorted(parsed_data.items())
+        data_check_string = "\n".join([f"{k}={v}" for k, v in sorted_items])
+        
+        # Calcolo della chiave derivata
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        
+        return hmac.compare_digest(computed_hash, received_hash)
+    except Exception as e:
+        print(f"⚠️ [SECURITY] Errore validazione initData: {e}")
+        return False
 
 @app.route('/telegram-webhook', methods=['POST'])
 def telegram_webhook():
@@ -127,16 +156,26 @@ def dashboard_view():
 @app.route('/api/metrics', methods=['GET'])
 def api_metrics():
     try:
-        print("📊 [WEBHOOK] Richiesta API per i dati della dashboard...")
-        dati_json = orchestrator.get_dashboard_metrics()
+        tg_init_data = request.headers.get('X-Telegram-Init-Data')
         
-        if dati_json.get("status") == "error":
-            return jsonify(dati_json), 500
-            
+        # Logica di Bypass Esclusiva per l'ambiente di Test Locale (localhost)
+        is_local = request.host.startswith('localhost') or request.host.startswith('127.0.0.1')
+        
+        if is_local and not tg_init_data:
+            print("⚠️ [SECURITY] Accesso Locale (BYPASS ATTIVO)")
+        else:
+            # Controllo di Sicurezza per la Produzione
+            if not verify_telegram_data(tg_init_data):
+                print("🔒 [SECURITY] Accesso API Bloccato: Firma Telegram non valida.")
+                return jsonify({"status": "error", "message": "Unauthorized"}), 401
+                
+        # Se passiamo il blocco, recuperiamo i dati veri
+        dati_json = orchestrator.get_dashboard_metrics()
         return jsonify(dati_json), 200
+        
     except Exception as e:
-        print(f"💥 [WEBHOOK] Errore fatale nella rotta API: {e}")
-        return jsonify({"status": "error", "message": "Errore interno del server"}), 500
+        print(f"💥 [WEBHOOK] Errore nella rotta API protetta: {e}")
+        return jsonify({"status": "error", "message": "Internal Error"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
