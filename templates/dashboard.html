@@ -80,8 +80,16 @@
 
         async function loadDashboardData() {
             try {
-                // Esegue la chiamata API al nostro backend
-                const response = await fetch('/api/metrics');
+                // La stringa initData contiene l'identità validata da Telegram
+                const initData = tg.initData || ''; 
+
+                const response = await fetch('/api/metrics', {
+                    method: 'GET',
+                    headers: {
+                        'X-Telegram-Init-Data': initData
+                    }
+                });
+
                 const res = await response.json();
 
                 if (res.status === 'success') {
