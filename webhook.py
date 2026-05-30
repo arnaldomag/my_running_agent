@@ -15,6 +15,33 @@ app = Flask(__name__)
 # Inizializziamo l'orchestratore
 orchestrator = BotOrchestrator(db, strava_client, analyst, notifier)
 
+# ==================================================
+# OTTIMIZZAZIONE CACHE E SICUREZZA HEADERS
+# ==================================================
+@app.after_request
+def add_security_and_cache_headers(response):
+    """
+    Aggiunge header di sicurezza a tutte le risposte e disabilita la cache 
+    aggressiva per le chiamate API per garantire dati sempre freschi.
+    """
+    # 1. Security Headers base
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+
+    # 2. Gestione Caching
+    # Se la richiesta è diretta all'API JSON, forziamo il browser a non usare la cache
+    if request.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    else:
+        # Per i file statici e l'HTML della dashboard, permettiamo una cache breve (es. 1 ora)
+        # per velocizzare l'apertura successiva su Telegram
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+
+    return response
+
 # --- LOGICA DI VALIDAZIONE TELEGRAM ---
 def verify_telegram_data(init_data_str):
     """Verifica l'autenticità del payload di Telegram tramite HMAC-SHA256"""
