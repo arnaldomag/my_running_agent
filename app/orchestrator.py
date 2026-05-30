@@ -493,7 +493,7 @@ class BotOrchestrator:
         messaggio = "Ecco la tua dashboard interattiva con i trend di allenamento e i dati del peso corporeo."
         
         # Inviamo il messaggio con la tastiera speciale contenente la Web App
-        self.notifier.send_message(chat_id, messaggio, reply_markup=markup)
+        self.notifier.send_message(messaggio, reply_markup=markup)
         return True
 
     def handle_fallback_ignore(self):
