@@ -87,6 +87,8 @@ def telegram_webhook():
             if testo.startswith('/'):
                 if testo_lower in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
                     orchestrator.process_shoe_list()
+                elif testo_lower == '/dashboard':
+                    orchestrator.handle_dashboard_view(chat_id)
                 elif testo_lower.startswith('/syncstorico'):
                     orchestrator.handle_sync_storico(testo)
                 elif testo_lower.startswith('/pianifica'):

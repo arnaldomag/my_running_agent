@@ -16,6 +16,13 @@ class Config:
         except:
             self.project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "my-running-agent")
 
+        # ==================================================
+        # 3. VARIABILI DI CONFIGURAZIONE (Task 4.2)
+        # ==================================================
+        # Inizializziamo l'URL della WebApp usando il tuo gestore dei segreti.
+        # N.B. Deve essere messo DOPO aver definito self.is_cloud e self.project_id
+        self.webapp_url = self.get_secret("WEBAPP_URL")
+
     def get_secret(self, name, default=None):
         """Recupera un segreto da Secret Manager (Cloud) o .env (Locale)"""
         if self.is_cloud:
