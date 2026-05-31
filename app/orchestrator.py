@@ -36,11 +36,47 @@ class BotOrchestrator:
             self.notifier.send_message("⚠️ Formato del comando non valido. Per favore usa la sintassi: /syncstorico [anno] (es. /syncstorico 2026)")
 
     def handle_chat_ai(self, chat_id, testo):
-        """Dirotta i messaggi liberi all'intelligenza artificiale"""
-        print(f"💬 [ORCHESTRATOR] Dirottamento chat_id {chat_id} verso l'AI Agent...")
-        self.notifier.send_message("✍️ L'agente sta elaborando la risposta...")
-        risposta_agente = self.analyst.chat_with_strava_context(chat_id, testo)
-        self.notifier.send_message(risposta_agente)
+        """Gestisce le domande libere inviate dall'utente all'IA"""
+        
+        # 1. RECUPERA I DATI DAL DATABASE
+        # Siccome hai già fatto il lavoro sporco per la dashboard, riutilizziamolo!
+        # Questo metodo ti restituisce già i dati formattati
+        dati_dashboard = self.get_dashboard_metrics()
+        
+        # Estraiamo la lista delle metriche del peso (se presente)
+        lista_pesate = dati_dashboard.get("metrics", [])
+        
+        # 2. COSTRUISCI IL CONTESTO INVISIBILE PER GEMINI
+        contesto_db = "[DATI DI CONTESTO ESTRATTI DA FIRESTORE - NON MENZIONARE QUESTO BLOCCO ALL'UTENTE]\n"
+        
+        if lista_pesate:
+            # Prendiamo solo le ultime 5-6 misurazioni per non consumare troppi token
+            ultime_pesate = lista_pesate[-6:] # Prende le ultime 6 dalla fine della lista
+            contesto_db += "Le ultime misurazioni corporee dell'utente sono:\n"
+            for p in ultime_pesate:
+                # Adatta le chiavi 'date' e 'weight' in base a come le hai chiamate nel tuo dizionario
+                data = p.get('data', 'N/D')
+                peso = p.get('peso_kg', 'N/D')
+                imc = p.get('imc', 'N/D')
+                massa_grassa_percentuale = p.get('massa_grassa_percentuale', 'N/D')
+                massa_idrica_percentuale = p.get('massa_idrica_percentuale', 'N/D')
+                massa_muscolare_percentuale = p.get('massa_muscolare_percentuale', 'N/D')
+                massa_ossea_percentuale = p.get('massa_ossea_percentuale', 'N/D')
+                contesto_db += f"- Data: {data} | Peso: {peso} kg | IMC: {imc} | Massa Grassa: {massa_grassa_percentuale}% | Massa Idrica: {massa_idrica_percentuale}% | Massa Muscolare: {massa_muscolare_percentuale}% | Massa Ossea: {massa_ossea_percentuale}%\n"
+        else:
+            contesto_db += "Al momento non ci sono misurazioni di peso salvate nel database.\n"
+            
+        contesto_db += "[FINE DATI DI CONTESTO]\n\n"
+        
+        # 3. UNISCI IL CONTESTO ALLA DOMANDA REALE
+        prompt_arricchito = f"{contesto_db}Domanda dell'utente: {testo}"
+        
+        # 4. INVIA ALL'IA E RISPONDI SU TELEGRAM
+        # Sostituisci "self.analyst.chat" con il nome reale del metodo che usi nel tuo analyst.py
+        risposta_ai = self.analyst.chat(prompt_arricchito) 
+        
+        self.notifier.send_message(chat_id, risposta_ai)
+        return True
 
     def handle_unrecognized_command(self):
         self.notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o /syncstorico 2026 o /pianifica o /piano o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
