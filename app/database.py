@@ -102,22 +102,38 @@ class RunningDB:
             print(f"❌ [DATABASE] Errore durante il salvataggio su Firestore: {e}")
             return False
 
-    def get_latest_weight(self):
-        """Recupera il peso corporeo in modo rigidamente cronologico"""
+    def get_latest_weight(self, return_full_dict=False):
+        """
+        Recupera l'ultima misurazione corporea.
+        Di default restituisce solo il peso in kg (float) per retrocompatibilità.
+        Se return_full_dict=True, restituisce l'intero dizionario con tutte le metriche.
+        """
         try:
+            doc_data = None
+            
             # 1. Tentativo con ordine decrescente (funziona per i nuovi record salvati con il timestamp)
             docs = self.db.collection("metrics").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(1).get()
             for doc in docs:
-                return doc.to_dict().get("peso_kg")
+                doc_data = doc.to_dict()
+                break  # Trovato il primo, esce dal ciclo
                 
             # 2. Fallback per i vecchi record (senza timestamp, estrae il primo disponibile)
-            docs_fallback = self.db.collection("metrics").limit(1).get()
-            for doc in docs_fallback:
-                return doc.to_dict().get("peso_kg")
-                
+            if not doc_data:
+                docs_fallback = self.db.collection("metrics").limit(1).get()
+                for doc in docs_fallback:
+                    doc_data = doc.to_dict()
+                    break
+
+            # 3. Restituzione del risultato in base al parametro richiesto
+            if doc_data:
+                if return_full_dict:
+                    return doc_data  # Restituisce tutto: massa ossea, idrica, grassa, ecc.
+                else:
+                    return doc_data.get("peso_kg")  # Comportamento classico: restituisce solo il numero
+                    
             return None
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nel recupero del peso: {e}")
+            print(f"❌ [DATABASE] Errore nel recupero delle metriche corporee: {e}")
             return None
 
     # ==========================================
