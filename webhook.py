@@ -73,6 +73,20 @@ def verify_telegram_data(init_data_str):
 def telegram_webhook():
     try:
         update = request.json
+
+        # ==================================================
+        # SISTEMA ANTI-DOPPIONI (TIMEOUT TELEGRAM)
+        # ==================================================
+        update_id = update.get('update_id')
+        if update_id:
+            if update_id in processed_updates:
+                print(f"♻️ [WEBHOOK] Retry di Telegram ignorato (Update ID: {update_id})")
+                return jsonify({"status": "ok"}), 200
+            
+            # Se è un messaggio nuovo, lo salviamo in memoria
+            processed_updates.append(update_id)
+        # ==================================================
+
         print(f"📥 [WEBHOOK] Ricevuto update: {update}")
         
         # ==================================================
