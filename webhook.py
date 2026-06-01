@@ -15,6 +15,9 @@ app = Flask(__name__)
 # Inizializziamo l'orchestratore
 orchestrator = BotOrchestrator(db, strava_client, analyst, notifier)
 
+# --- MEMORIA ANTI-DOPPIONI ---
+processed_updates = deque(maxlen=100)
+
 # ==================================================
 # OTTIMIZZAZIONE CACHE E SICUREZZA HEADERS
 # ==================================================
