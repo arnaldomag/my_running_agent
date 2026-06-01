@@ -40,29 +40,34 @@ class BotOrchestrator:
         print(f"💬 [ORCHESTRATOR] Dirottamento chat_id {chat_id} verso l'AI Agent...")
         self.notifier.send_message("✍️ L'agente sta elaborando la risposta...")
         
-        # 1. Recupera l'ultimo peso registrato sfruttando la funzione della dashboard
-        dati_dashboard = self.db.get_latest_weight(return_full_dict=True)
-
-        if dati_dashboard:
-            peso_kg = dati_dashboard.get("peso_kg", "N/D")
-            imc = dati_dashboard.get("imc", "N/D")
-            massa_grassa = dati_dashboard.get("massa_grassa_percentuale", "N/D")
-            massa_muscolare = dati_dashboard.get("massa_muscolare_percentuale", "N/D")
-            massa_ossea = dati_dashboard.get("massa_ossea_percentuale", "N/D")
-            massa_idrica = dati_dashboard.get("massa_idrica_percentuale", "N/D") 
-           
-        # 2. Prepariamo il messaggio "arricchito" in modo invisibile
-        if dati_dashboard:
-            testo_arricchito = (
-                f"[CONTESTO INVISIBILE DA FIRESTORE: L'ultimo peso corporeo registrato "
-                f"dall'utente è {peso_kg} kg, IMC {imc}, Massa Grassa {massa_grassa}%, Massa Muscolare {massa_muscolare}%, "
-                f"Massa Ossea {massa_ossea}%, Massa Idrica {massa_idrica}%]\n\n"
-                f"Domanda dell'utente: {testo}"
-            )
-        else:
-            testo_arricchito = testo
+        # 1. Recupero l'ultimo peso registrato
+        dati_dashboard = self.get_dashboard_metrics()
+        peso_attuale = 0
+        if dati_dashboard.get("status") == "success":
+            peso_attuale = dati_dashboard.get("data", {}).get("latest_weight", 0)
             
-        # 3. Chiamata al metodo CORRETTO dell'analyst, che inietta già le corse Strava
+        # 2. Recupero il Piano Settimanale Attuale da Firestore
+        piano = self.db.get_weekly_plan()
+        testo_piano = ""
+        
+        if piano and piano.get("sessions"):
+            testo_piano = "[CONTESTO INVISIBILE: PIANO SETTIMANALE PROGRAMMATO]\n"
+            for s in piano["sessions"]:
+                stato = "✅ COMPLETATA" if s["status"] == "done" else "🟡 DA FARE"
+                # Uniamo gli step in un'unica stringa leggibile
+                steps_str = " | ".join(s.get("steps", []))
+                testo_piano += f"- {s['name']} [{stato}]: {steps_str}\n"
+            testo_piano += "[FINE PIANO SETTIMANALE]\n\n"
+            
+        # 3. Prepariamo il messaggio "arricchito" unendo tutti i contesti
+        contesto_invisibile = testo_piano
+        
+        if peso_attuale > 0:
+            contesto_invisibile += f"[CONTESTO INVISIBILE: L'ultimo peso corporeo registrato è {peso_attuale} kg.]\n\n"
+            
+        testo_arricchito = f"{contesto_invisibile}Domanda dell'utente: {testo}"
+            
+        # 4. Chiamata al metodo dell'analyst, che inietta le corse Strava reali
         risposta_agente = self.analyst.chat_with_strava_context(chat_id, testo_arricchito)
         
         self.notifier.send_message(risposta_agente)
