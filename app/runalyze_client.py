@@ -249,4 +249,4 @@ class RunalyzeClient:
 # In questo modo webhook.py e orchestrator.py continueranno a funzionare
 # alla perfezione senza dover cambiare nemmeno una virgola nel loro codice.
 # =========================================================================
-strava_client = RunalyzeClient()
+runalyze_client = RunalyzeClient()

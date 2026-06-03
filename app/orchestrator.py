@@ -4,9 +4,9 @@ from datetime import date, timedelta, datetime
 from app.config import config
 
 class BotOrchestrator:
-    def __init__(self, db, strava_client, analyst, notifier):
+    def __init__(self, db, runalyze_client, analyst, notifier):
         self.db = db
-        self.strava_client = strava_client
+        self.runalyze_client = runalyze_client
         self.analyst = analyst
         self.notifier = notifier
 
@@ -29,8 +29,8 @@ class BotOrchestrator:
         parti = testo.split()
         if len(parti) > 1 and parti[1].isdigit():
             anno = int(parti[1])
-            self.notifier.send_message(f"⏳ Avvio sincronizzazione storica per l'anno {anno}. Scarico i dati da Strava e aggiorno il database, un attimo di pazienza...")
-            corse_elaborate = self.strava_client.sync_historical_data_by_year(self.db, anno)
+            self.notifier.send_message(f"⏳ Avvio sincronizzazione storica per l'anno {anno}. Scarico i dati da Runalyze e aggiorno il database, un attimo di pazienza...")
+            corse_elaborate = self.runalyze_client.sync_historical_data_by_year(self.db, anno)
             self.notifier.send_message(f"✅ Sincronizzazione {anno} completata! Ho importato o aggiornato {corse_elaborate} corse su Firestore.")
         else:
             self.notifier.send_message("⚠️ Formato del comando non valido. Per favore usa la sintassi: /syncstorico [anno] (es. /syncstorico 2026)")
@@ -67,8 +67,8 @@ class BotOrchestrator:
             
         testo_arricchito = f"{contesto_invisibile}Domanda dell'utente: {testo}"
             
-        # 4. Chiamata al metodo dell'analyst, che inietta le corse Strava reali
-        risposta_agente = self.analyst.chat_with_strava_context(chat_id, testo_arricchito)
+        # 4. Chiamata al metodo dell'analyst, che inietta le corse Runalyze reali
+        risposta_agente = self.analyst.chat_with_runalyze_context(chat_id, testo_arricchito)
         
         self.notifier.send_message(risposta_agente)
 
@@ -186,9 +186,9 @@ class BotOrchestrator:
     def process_shoe_list(self):
         try:
             print("👟 [ORCHESTRATOR] Recupero scarpiera...")
-            scarpe = self.strava_client.fetch_athlete_shoes()
+            scarpe = self.runalyze_client.fetch_athlete_shoes()
             if not scarpe:
-                self.notifier.send_message("❌ La tua scarpiera virtuale su Strava è vuota!")
+                self.notifier.send_message("❌ La tua scarpiera virtuale su Runalyze è vuota!")
                 return
                 
             bottoni = []
@@ -211,8 +211,8 @@ class BotOrchestrator:
     def process_shoe_analysis(self, gear_id):
         try:
             print(f"🔍 [ORCHESTRATOR] Avvio analisi tecnica scarpa: {gear_id}")
-            self.notifier.send_message("🔍 Controllo la telemetria della scarpa nel garage Strava...")
-            gear_details = self.strava_client.fetch_gear_details(gear_id)
+            self.notifier.send_message("🔍 Controllo la telemetria della scarpa nel garage Runalyze...")
+            gear_details = self.runalyze_client.fetch_gear_details(gear_id)
             
             if not gear_details:
                 self.notifier.send_message("❌ Impossibile leggere i dati di questo modello.")
@@ -273,8 +273,8 @@ class BotOrchestrator:
     # ==========================================
     def process_run_analysis(self, activity_id):
         try:
-            self.notifier.send_message(f"⏳ Recupero dettagli dell'allenamento da Strava...")
-            activity_details = self.strava_client.fetch_activity_details(activity_id)
+            self.notifier.send_message(f"⏳ Recupero dettagli dell'allenamento da Runalyze...")
+            activity_details = self.runalyze_client.fetch_activity_details(activity_id)
             if not activity_details:
                 return
             self.notifier.send_message("🧠 Dati ricevuti. L'Agente sta elaborando l'analisi...")
@@ -286,7 +286,7 @@ class BotOrchestrator:
     def process_cron_weekly_report(self):
         try:
             print("⏰ [ORCHESTRATOR] Avvio report settimanale schedulato...")
-            self.strava_client.sync_latest_activities(self.db, limit=30)
+            self.runalyze_client.sync_latest_activities(self.db, limit=30)
 
             oggi = date.today()
             giorno_settimana = oggi.weekday()
@@ -377,7 +377,7 @@ class BotOrchestrator:
                 labels.append(label_data)
                 
                 # Conversione Distanza (da metri a km con 2 decimali)
-                # Controlliamo se il dato è nativo di Strava (distance) o già elaborato (distanza)
+                # Controlliamo se il dato è nativo di Runalyze (distance) o già elaborato (distanza)
                 metri = run.get('distance', run.get('distanza', 0))
                 # Se il dato nel DB era già in km, non dividiamo per 1000
                 km = metri / 1000 if metri > 100 else metri
@@ -415,10 +415,10 @@ class BotOrchestrator:
     def process_fallback_weekly_report(self):
         try:
             print("📅 [ORCHESTRATOR] Avvio recupero settimana di fallback...")
-            self.strava_client.sync_latest_activities(self.db, limit=30)
+            self.runalyze_client.sync_latest_activities(self.db, limit=30)
             
-            self.notifier.send_message("🔍 Alla ricerca dell'ultimo periodo attivo su Strava...")
-            lista_corse, km_totali, start_date, end_date = self.strava_client.fetch_last_active_week()
+            self.notifier.send_message("🔍 Alla ricerca dell'ultimo periodo attivo su Runalyze...")
+            lista_corse, km_totali, start_date, end_date = self.runalyze_client.fetch_last_active_week()
             
             if not lista_corse:
                 self.notifier.send_message("❌ Non ho trovato nessuna sessione di corsa memorizzata nello storico recente.")

@@ -30,7 +30,7 @@ class RunningAnalyst:
         # 3. Usiamo la versione stabile e globale
         self.model_id = "gemini-3.5-flash"
 
-    def chat_with_strava_context(self, chat_id, user_text):
+    def chat_with_runalyze_context(self, chat_id, user_text):
         """Gestisce una conversazione fluida iniettando lo storico allenamenti come system instruction"""
         try:
             # 1. Recupero dinamico
@@ -38,7 +38,7 @@ class RunningAnalyst:
             
             if recent_runs:
                 storico_compatto = []
-                strava_workout_types = {
+                runalyze_workout_types = {
                     0: "Recupero/Base",
                     1: "Gara",
                     2: "Lungo",
@@ -47,7 +47,7 @@ class RunningAnalyst:
                 
                 for run in recent_runs:
                     tipo_id = run.get('workout_type')
-                    tipo_corsa = strava_workout_types.get(tipo_id, "Base") if tipo_id is not None else "Base"
+                    tipo_corsa = runalyze_workout_types.get(tipo_id, "Base") if tipo_id is not None else "Base"
                     distanza_km = run.get('distance', 0) / 1000
                     tempo_min = run.get('moving_time', 0) // 60
                     
@@ -182,7 +182,7 @@ class RunningAnalyst:
         if not note:
             note = "Nessun obiettivo o struttura specificata nelle note private."
 
-        # 4. Compilazione del prompt usando le chiavi estratte in strava_client.py
+        # 4. Compilazione del prompt usando le chiavi estratte in runalyze_client.py
         prompt = PROMPT_ANALISI_CORSA.format(
             nome=dati_corsa['nome'],
             distanza=dati_corsa['distanza'],

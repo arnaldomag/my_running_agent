@@ -71,7 +71,7 @@ REGOLE DI FORMATTAZIONE PER TELEGRAM:
 - Restituisci esclusivamente il testo formattato pronto per l'invio."""
 
 PROMPT_ANALISI_SCARPA = """Analizza tecnicamente la seguente scarpa da running e il suo stato di usura:
-- Nome in Strava: {nome}
+- Nome in Runalyze: {nome}
 - Marca: {brand}
 - Modello: {model_name}
 - Chilometri attuali: {km_attuali:.2f} km

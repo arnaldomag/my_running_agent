@@ -1,6 +1,6 @@
 from app.config import config
 from app.database import db
-from app.strava_client import strava_client
+from app.runalyze_client import runalyze_client
 from app.analyst import analyst
 import sys
 from app.telegram_client import notifier
@@ -8,7 +8,7 @@ from app.telegram_client import notifier
 def sync_activities():
     print("🔄 Sincronizzazione attività da Strava...")
     try:
-        activities = strava_client.fetch_recent_activities(limit=5)
+        activities = runalyze_client.fetch_recent_activities(limit=5)
         for activity in activities:
             data = {
                 "id": activity['id'],
@@ -63,7 +63,7 @@ def main():
             print(f"- {r['start_date']}: {r['name']} ({distanza_km:.2f} km)")
 
         print("\n📊 Recupero dati della settimana in corso da Strava...")
-        lista_corse, km_totali = strava_client.fetch_weekly_runs()
+        lista_corse, km_totali = runalyze_client.fetch_weekly_runs()
 
         # --- SE LA SETTIMANA È VUOTA: PROPONI IL BIVIO INTERATTIVO ---
         if not lista_corse:
