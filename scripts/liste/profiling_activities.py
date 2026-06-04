@@ -11,7 +11,7 @@ def analizza_struttura():
     firestore_client = db.db
     
     # Leggiamo tutta la collection
-    corse_ref = firestore_client.collection("activities").stream()
+    corse_ref = firestore_client.collection("attivita").stream()
     
     # Trasformiamo i documenti in una lista di dizionari
     dati = [doc.to_dict() for doc in corse_ref]
@@ -45,8 +45,8 @@ def select_all():
     firestore_client = db.db
     
     # 2. Questa è la vera e propria "SELECT * FROM activities"
-    corse_ref = firestore_client.collection("activities").stream()
-    
+    corse_ref = firestore_client.collection("attivita").where("workout_type", "==", "Interval training").stream()
+
     # 3. I dati arrivano grezzi, dobbiamo "scartarli" ed estrarli
     risultati = []
     for doc in corse_ref:
@@ -64,5 +64,5 @@ def select_all():
     
 if __name__ == "__main__":
     # Assicurati di aver installato pandas: pip install pandas
-    analizza_struttura()
-    # select_all()
+    # analizza_struttura()
+    select_all()
