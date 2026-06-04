@@ -1,80 +1,88 @@
 import os
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
 
-# Carica automaticamente le variabili dal file .env
 load_dotenv()
 
 RUNALYZE_TOKEN = os.getenv("RUNALYZE_TOKEN")
 BASE_URL = "https://runalyze.com/api/v1"
+HEADERS = {'token': RUNALYZE_TOKEN}
 
-def elenca_corse_runalyze():
-    print("🔄 Connessione a Runalyze in corso...")
+def elenca_giugno_runalyze():
+    print("🔄 Interrogo l'API di Runalyze (GET /api/v1/activity)...")
     
     if not RUNALYZE_TOKEN:
         print("❌ Errore: RUNALYZE_TOKEN non trovato nel file .env!")
         return
 
-    headers = {'token': RUNALYZE_TOKEN}
+    corse_giugno = []
+    page = 1
+    items_per_page = 100
     
-    print("📥 Scarico la cronologia delle attività...")
-    runalyze_activities = []
-    limit = 100
-    offset = 0
-    
-    # Ciclo per scaricare tutte le pagine
     while True:
-        try:
-            res = requests.get(f"{BASE_URL}/activities?limit={limit}&offset={offset}", headers=headers)
-            if res.status_code != 200:
-                print(f"❌ Errore API: Status {res.status_code} - {res.text}")
-                break
-            
-            data = res.json()
-            if not data or len(data) == 0:
-                break
-                
-            runalyze_activities.extend(data)
-            
-            # Se la pagina scaricata ha meno elementi del limite, significa che è l'ultima
-            if len(data) < limit:
-                break
-                
-            offset += limit
-        except Exception as e:
-            print(f"❌ Errore di connessione: {e}")
+        url = f"{BASE_URL}/activity?page={page}&itemsPerPage={items_per_page}"
+        res = requests.get(url, headers=HEADERS)
+        
+        if res.status_code != 200:
+            print(f"❌ Errore API sulla pagina {page}: Status {res.status_code}")
+            print(res.text[:200])
             break
+            
+        data = res.json()
+        
+        # Se la pagina è vuota, abbiamo finito di scorrere lo storico
+        if not data:
+            break
+            
+        # Filtriamo le corse di giugno 2026
+        for act in data:
+            # Il formato stringa di date_time fornito da Runalyze inizia con YYYY-MM
+            date_time = act.get('date_time', '')
+            
+            if date_time.startswith("2026-06"):
+                corse_giugno.append(act)
+                
+        # Se la pagina scaricata ha meno elementi del massimo, è l'ultima pagina
+        if len(data) < items_per_page:
+            break
+            
+        page += 1
 
-    print(f"\n✅ Trovate {len(runalyze_activities)} corse totali su Runalyze.\n")
-    
-    if len(runalyze_activities) == 0:
-        print("📭 Nessuna corsa trovata. Verifica di aver completato l'importazione dello storico dal sito di Runalyze.")
+    if not corse_giugno:
+        print("📭 Nessuna corsa trovata per Giugno 2026 su Runalyze.")
         return
 
-    # Intestazione della tabella formattata
-    print("📋 ELENCO COMPLETO DELLE CORSE SU RUNALYZE:")
-    print("-" * 85)
-    print(f"{'DATA':<12} | {'ID CORSA':<12} | {'DISTANZA':<10} | {'DURATA':<10} | {'TITOLO'}")
-    print("-" * 85)
+    # Ordiniamo per data (dal 1 al 30 giugno)
+    corse_giugno = sorted(corse_giugno, key=lambda x: x.get('date_time', ''))
+
+    print(f"\n✅ Trovate {len(corse_giugno)} corse a Giugno 2026.\n")
     
-    # Iteriamo sui dati per stampare ogni riga
-    for act in runalyze_activities:
-        # Runalyze fornisce un timestamp in secondi, lo convertiamo in formato leggibile
-        data_str = datetime.fromtimestamp(act['time']).strftime('%Y-%m-%d')
-        id_corsa = act['id']
-        dist_km = act.get('distance', 0)
-        durata_sec = act.get('duration', 0)
-        durata_min = int(durata_sec / 60)
+    # Intestazione della tabella
+    print("-" * 90)
+    print(f"{'DATA E ORA':<20} | {'ID CORSA':<12} | {'DISTANZA':<10} | {'DURATA':<8} | {'SCARPE'}")
+    print("-" * 90)
+    
+    for corsa in corse_giugno:
+        data_pulita = corsa.get('date_time', 'N/D')[:16] # Tagliamo i secondi/timezone per pulizia
+        id_corsa = corsa.get('id', 'N/D')
         
-        # Tronchiamo il titolo a 25 caratteri per evitare che scombini l'impaginazione della tabella
-        titolo = act.get('title', 'Senza Titolo')
-        if titolo and len(titolo) > 25:
-            titolo = titolo[:22] + "..."
+        distanza_km = corsa.get('distance', 0)
+        
+        # L'API restituisce 'duration' in secondi
+        durata_secondi = corsa.get('duration', 0)
+        minuti = int(durata_secondi / 60)
+        
+        # Estraiamo l'array dell'equipaggiamento per leggere il nome della scarpa
+        equip_list = corsa.get('equipment', [])
+        if equip_list:
+            # Se ci sono più equipaggiamenti (es. fascia cardio e scarpe), li uniamo
+            scarpe = ", ".join([e.get('name', 'Sconosciuta') for e in equip_list])
+        else:
+            scarpe = "Nessuna"
             
-        print(f"{data_str:<12} | {id_corsa:<12} | {dist_km:>6.2f} km | {durata_min:>6} min | {titolo}")
+        print(f"{data_pulita:<20} | {str(id_corsa):<12} | {distanza_km:>6.2f} km | {minuti:>4} min | {scarpe}")
         
-    print("-" * 85 + "\n")
+    print("-" * 90 + "\n")
 
 if __name__ == "__main__":
-    elenca_corse_runalyze()
+    elenca_giugno_runalyze()
