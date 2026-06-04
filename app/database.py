@@ -6,7 +6,8 @@ from google import genai
 class RunningDB:
     def __init__(self):
         self.db = firestore.Client(project=config.project_id, database="my-running-agent")
-        self.collection_name = "activities"
+        # Puntamento aggiornato alla nuova tabella Runalyze
+        self.collection_name = "attivita"
 
     # ==========================================
     # 1. GESTIONE CRONOLOGIA AI (CHAT)
@@ -66,7 +67,7 @@ class RunningDB:
         return True
 
     # ==========================================
-    # 2. GESTIONE ATTIVITÀ STRAVA (ETL)
+    # 2. GESTIONE ATTIVITÀ RUNALYZE (ETL)
     # ==========================================
     def update_activity(self, activity_data):
         activity_id = str(activity_data.get('id'))

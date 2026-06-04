@@ -193,7 +193,8 @@ class BotOrchestrator:
                 
             bottoni = []
             for scarpa in scarpe:
-                km = scarpa.get('distance', 0) / 1000
+                # La distanza da Runalyze è già in km
+                km = scarpa.get('distance', 0) 
                 nome = scarpa.get('name', 'Scarpa Sconosciuta')
                 bottone = {
                     "text": f"👟 {nome} ({km:.0f} km)",
@@ -296,7 +297,8 @@ class BotOrchestrator:
             str_lunedi = lunedi_corrente.strftime("%Y-%m-%d")
             str_domenica = domenica_corrente.strftime("%Y-%m-%d")
             
-            query_corse = self.db.db.collection("activities") \
+            # Utilizziamo la proprietà collection_name per puntare ad 'attivita'
+            query_corse = self.db.db.collection(self.db.collection_name) \
                 .where("start_date", ">=", str_lunedi) \
                 .where("start_date", "<=", str_domenica) \
                 .order_by("start_date", direction="DESCENDING") \
@@ -306,9 +308,9 @@ class BotOrchestrator:
             for doc in query_corse:
                 corsa_dict = doc.to_dict()
                 corsa_dict['data'] = corsa_dict.get('start_date', 'N/D')
-                corsa_dict['nome'] = corsa_dict.get('name', 'Corsa')
-                corsa_dict['distanza'] = corsa_dict.get('distance', 0)
-                corsa_dict['tempo'] = corsa_dict.get('moving_time', 0)
+                corsa_dict['nome'] = corsa_dict.get('nome', 'Corsa')
+                corsa_dict['distanza'] = corsa_dict.get('distanza', 0)
+                corsa_dict['tempo'] = corsa_dict.get('tempo_movimento', 0)
                 lista_corse.append(corsa_dict)
 
             data_inizio_it = lunedi_corrente.strftime("%d/%m")
@@ -321,7 +323,8 @@ class BotOrchestrator:
                 )
                 return
 
-            km_totali = sum([c.get('distance', 0) for c in lista_corse]) / 1000
+            # Sommiamo le distanze (già salvate in km)
+            km_totali = sum([c.get('distanza', 0) for c in lista_corse])
             self.notifier.send_message(f"🤖 Elaborazione del report parziale per la settimana {data_inizio_it} - {data_fine_it}...")
             
             feedback_raw = self.analyst.analyze_weekly_summary(lista_corse, km_totali)
@@ -330,7 +333,7 @@ class BotOrchestrator:
             
             bottoni = []
             for corsa in lista_corse:
-                nome_corsa = corsa.get('name', corsa.get('nome', 'Corsa'))
+                nome_corsa = corsa.get('nome', 'Corsa')
                 bottoni.append([{
                     "text": f"📊 Analizza {nome_corsa}", 
                     "callback_data": f"analyze_{corsa['id']}"
@@ -351,7 +354,6 @@ class BotOrchestrator:
         e prepara il time-series payload per il frontend della Mini App.
         """
         try:
-            # 1. Recupero un congruo storico di corse per l'analisi (ultime 15)
             recent_runs = self.db.get_recent_runs(limit=15)
             
             if not recent_runs:
@@ -360,7 +362,6 @@ class BotOrchestrator:
                     "data": {"labels": [], "kilometers": [], "paces": [], "latest_weight": 0}
                 }
             
-            # Invertiamo l'ordine per visualizzare il grafico cronologicamente da sinistra a destra
             recent_runs.reverse()
             
             labels = []
@@ -368,7 +369,6 @@ class BotOrchestrator:
             paces = []
             
             for run in recent_runs:
-                # Formattazione Data (MM-DD) per l'etichetta dell'asse X
                 start_date = run.get('start_date', '')
                 if len(start_date) >= 10:
                     label_data = start_date[5:10] # Estrae "MM-DD"
@@ -376,26 +376,20 @@ class BotOrchestrator:
                     label_data = "Corsa"
                 labels.append(label_data)
                 
-                # Conversione Distanza (da metri a km con 2 decimali)
-                # Controlliamo se il dato è nativo di Runalyze (distance) o già elaborato (distanza)
-                metri = run.get('distance', run.get('distanza', 0))
-                # Se il dato nel DB era già in km, non dividiamo per 1000
-                km = metri / 1000 if metri > 100 else metri
+                # Il campo 'distanza' è già in km
+                km = run.get('distanza', 0)
                 kilometers.append(round(km, 2))
                 
-                # Calcolo del Passo Medio in minuti decimali (es: 5'30" -> 5.5)
-                tempo_sec = run.get('moving_time', run.get('tempo_movimento', 0))
-                # Se il tempo è memorizzato in minuti, lo riportiamo in secondi per il calcolo
-                if tempo_sec < 500 and km > 0: 
-                    tempo_sec = tempo_sec * 60
+                # Il tempo movimento è in minuti
+                tempo_min = run.get('tempo_movimento', 0)
                 
+                # Passo medio in minuti decimali per km (es: 5'30" -> 5.5)
                 if km > 0:
-                    passo_totale_minuti = (tempo_sec / 60) / km
+                    passo_totale_minuti = tempo_min / km
                     paces.append(round(passo_totale_minuti, 2))
                 else:
                     paces.append(0)
             
-            # 2. Recupero l'ultimo peso registrato tramite OCR della bilancia
             latest_weight = self.db.get_latest_weight()
             
             return {
@@ -450,13 +444,9 @@ class BotOrchestrator:
         """Genera e invia il bottone inline per aprire la Telegram Mini App"""
         app_url = config.webapp_url
         if not app_url:
-            # Nota: ho corretto il typo 'non' con 'not'
-            # Se il tuo notifier richiede il chat_id come primo argomento, lascialo così,
-            # altrimenti rimuovi 'chat_id,' se usa un ID cablato nel servizio.
             self.notifier.send_message(chat_id, "⚠️ URL della Web App non configurato.")
             return True
             
-        # Costruzione del payload InlineKeyboardMarkup per Telegram
         markup = {
             "inline_keyboard": [
                 [
@@ -469,8 +459,6 @@ class BotOrchestrator:
         }
         
         messaggio = "Ecco la tua dashboard interattiva con i trend di allenamento e i dati del peso corporeo."
-        
-        # Inviamo il messaggio con la tastiera speciale contenente la Web App
         self.notifier.send_message(messaggio, reply_markup=markup)
         return True
 
