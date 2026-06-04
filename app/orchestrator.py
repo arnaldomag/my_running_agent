@@ -185,19 +185,38 @@ class BotOrchestrator:
     # ==========================================
     def process_shoe_list(self):
         try:
-            print("👟 [ORCHESTRATOR] Recupero scarpiera...")
-            scarpe = self.runalyze_client.fetch_athlete_shoes()
-            if not scarpe:
+            print("👟 [ORCHESTRATOR] Recupero scarpiera e calcolo chilometraggi...")
+            scarpe_api = self.runalyze_client.fetch_athlete_shoes()
+            if not scarpe_api:
                 self.notifier.send_message("❌ La tua scarpiera virtuale su Runalyze è vuota!")
                 return
                 
+            # Calcoliamo i km leggendoli direttamente dalla NOSTRA fonte di verità (Firestore).
+            # Questo bypassa la mancanza del dato aggregato sull'API dell'equipment di Runalyze.
+            tutte_le_corse = self.db.db.collection(self.db.collection_name).get()
+            km_per_scarpa = {}
+            
+            for doc in tutte_le_corse:
+                dati = doc.to_dict()
+                distanza_km = dati.get('distanza', 0)
+                scarpe_str = dati.get('scarpe', '')
+                
+                # Dividiamo la stringa nel caso ci siano più equipaggiamenti associati (es. "Scarpa, Fascia Cardio")
+                if scarpe_str and scarpe_str != "Non specificate":
+                    for s in scarpe_str.split(','):
+                        s_nome = s.strip()
+                        if s_nome not in km_per_scarpa:
+                            km_per_scarpa[s_nome] = 0
+                        km_per_scarpa[s_nome] += distanza_km
+
             bottoni = []
-            for scarpa in scarpe:
-                # La distanza da Runalyze è già in km
-                km = scarpa.get('distance', 0) 
+            for scarpa in scarpe_api:
                 nome = scarpa.get('name', 'Scarpa Sconosciuta')
+                # Recuperiamo i KM reali dal nostro dizionario calcolato (di default 0 se è nuova e mai usata)
+                km_reali = km_per_scarpa.get(nome, 0)
+                
                 bottone = {
-                    "text": f"👟 {nome} ({km:.0f} km)",
+                    "text": f"👟 {nome} ({km_reali:.0f} km)",
                     "callback_data": f"shoe_{scarpa['id']}"
                 }
                 bottoni.append([bottone])
@@ -212,12 +231,26 @@ class BotOrchestrator:
     def process_shoe_analysis(self, gear_id):
         try:
             print(f"🔍 [ORCHESTRATOR] Avvio analisi tecnica scarpa: {gear_id}")
-            self.notifier.send_message("🔍 Controllo la telemetria della scarpa nel garage Runalyze...")
+            self.notifier.send_message("🔍 Controllo la telemetria della scarpa incrociando i dati del database...")
             gear_details = self.runalyze_client.fetch_gear_details(gear_id)
             
             if not gear_details:
                 self.notifier.send_message("❌ Impossibile leggere i dati di questo modello.")
                 return
+                
+            # Poiché l'API Runalyze non riporta la distanza, la ricalcoliamo al volo da Firestore
+            nome_scarpa = gear_details.get('name', 'Sconosciuta')
+            tutte_le_corse = self.db.db.collection(self.db.collection_name).get()
+            km_reali = 0
+            
+            for doc in tutte_le_corse:
+                dati = doc.to_dict()
+                scarpe_str = dati.get('scarpe', '')
+                if nome_scarpa in scarpe_str:
+                    km_reali += dati.get('distanza', 0)
+                    
+            # Iniettiamo il dato corretto e vitale nel dizionario prima di passarlo a Gemini per l'analisi
+            gear_details['distance'] = km_reali
                 
             peso_attuale = self.db.get_latest_weight()
             if peso_attuale:
@@ -228,7 +261,7 @@ class BotOrchestrator:
             report_scarpa = self.analyst.analyze_shoe(gear_details, peso_atleta=peso_attuale)
             report_pulito = report_scarpa.replace("```html", "").replace("```", "").strip()
             
-            messaggio_finale = f"👟 <b>Tagliando Materiali: {gear_details.get('name')}</b>\n\n{report_pulito}"
+            messaggio_finale = f"👟 <b>Tagliando Materiali: {nome_scarpa} ({km_reali:.0f} km)</b>\n\n{report_pulito}"
             self.notifier.send_message(messaggio_finale)
         except Exception as e:
             print(f"❌ [ORCHESTRATOR] Errore in process_shoe_analysis: {e}")
