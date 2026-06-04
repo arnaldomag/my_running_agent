@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request, jsonify, render_template
 # Importiamo moduli e servizi
-from app.strava_client import strava_client
+from app.runalyze_client import runalyze_client
 from app.analyst import analyst
 from app.telegram_client import notifier
 from app.database import db
@@ -14,7 +14,7 @@ from collections import deque
 app = Flask(__name__)
 
 # Inizializziamo l'orchestratore
-orchestrator = BotOrchestrator(db, strava_client, analyst, notifier)
+orchestrator = BotOrchestrator(db, runalyze_client, analyst, notifier)
 
 # --- MEMORIA ANTI-DOPPIONI ---
 processed_updates = deque(maxlen=100)

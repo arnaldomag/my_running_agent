@@ -1,26 +1,19 @@
 from app.config import config
 from app.database import db
-from app.strava_client import strava_client
+from app.runalyze_client import runalyze_client
 from app.analyst import analyst
 import sys
+from datetime import date, timedelta
 from app.telegram_client import notifier
 
 def sync_activities():
-    print("🔄 Sincronizzazione attività da Strava...")
+    print("🔄 Sincronizzazione attività da Runalyze...")
     try:
-        activities = strava_client.fetch_recent_activities(limit=5)
-        for activity in activities:
-            data = {
-                "id": activity['id'],
-                "name": activity['name'],
-                "distance": activity['distance'],
-                "moving_time": activity['moving_time'],
-                "type": activity['type'],
-                "start_date": activity['start_date'],
-                "average_speed": activity['average_speed']
-            }
-            db.update_activity(data)
-        print(f"✅ Sincronizzazione completata: {len(activities)} attività elaborate.")
+        # Il nuovo metodo sync_latest_activities fa già tutto: scarica, mappa e salva su Firestore
+        if runalyze_client.sync_latest_activities(db, limit=5):
+            print("✅ Sincronizzazione rapida completata con successo.")
+        else:
+            print("⚠️ Sincronizzazione completata con qualche anomalia.")
     except Exception as e:
         print(f"❌ Errore durante la sincronizzazione: {e}")
 
@@ -59,11 +52,38 @@ def main():
         print("\nUltime 3 corse salvate nel Cloud:")
         runs = db.get_recent_runs(limit=3)
         for r in runs:
-            distanza_km = r['distance'] / 1000
-            print(f"- {r['start_date']}: {r['name']} ({distanza_km:.2f} km)")
+            # Estrazione usando le nuove chiavi italiane. Distanza è già in KM!
+            distanza_km = r.get('distanza', 0)
+            nome = r.get('nome', 'Corsa')
+            data_start = r.get('start_date', 'N/D')
+            print(f"- {data_start}: {nome} ({distanza_km:.2f} km)")
 
-        print("\n📊 Recupero dati della settimana in corso da Strava...")
-        lista_corse, km_totali = strava_client.fetch_weekly_runs()
+        print("\n📊 Recupero dati della settimana in corso dal database...")
+        # Estraiamo i dati della settimana direttamente da Firestore come fa l'Orchestrator
+        oggi = date.today()
+        lunedi = oggi - timedelta(days=oggi.weekday())
+        domenica = lunedi + timedelta(days=6)
+        
+        str_lunedi = lunedi.strftime("%Y-%m-%d")
+        str_domenica = domenica.strftime("%Y-%m-%d")
+        
+        query_corse = db.db.collection(db.collection_name) \
+            .where("start_date", ">=", str_lunedi) \
+            .where("start_date", "<=", str_domenica) \
+            .order_by("start_date", direction="DESCENDING") \
+            .get()
+
+        lista_corse = []
+        for doc in query_corse:
+            corsa = doc.to_dict()
+            corsa['data'] = corsa.get('start_date', 'N/D')
+            corsa['nome'] = corsa.get('nome', 'Corsa')
+            corsa['distanza'] = corsa.get('distanza', 0)
+            corsa['tempo'] = corsa.get('tempo_movimento', 0)
+            lista_corse.append(corsa)
+
+        # Sommiamo le distanze già in chilometri
+        km_totali = sum([c['distanza'] for c in lista_corse])
 
         # --- SE LA SETTIMANA È VUOTA: PROPONI IL BIVIO INTERATTIVO ---
         if not lista_corse:

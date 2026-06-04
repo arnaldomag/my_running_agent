@@ -30,7 +30,7 @@ class RunningAnalyst:
         # 3. Usiamo la versione stabile e globale
         self.model_id = "gemini-3.5-flash"
 
-    def chat_with_strava_context(self, chat_id, user_text):
+    def chat_with_runalyze_context(self, chat_id, user_text):
         """Gestisce una conversazione fluida iniettando lo storico allenamenti come system instruction"""
         try:
             # 1. Recupero dinamico
@@ -38,20 +38,17 @@ class RunningAnalyst:
             
             if recent_runs:
                 storico_compatto = []
-                strava_workout_types = {
-                    0: "Recupero/Base",
-                    1: "Gara",
-                    2: "Lungo",
-                    3: "Qualità"
-                }
                 
                 for run in recent_runs:
-                    tipo_id = run.get('workout_type')
-                    tipo_corsa = strava_workout_types.get(tipo_id, "Base") if tipo_id is not None else "Base"
-                    distanza_km = run.get('distance', 0) / 1000
-                    tempo_min = run.get('moving_time', 0) // 60
+                    # Estrazione diretta delle stringhe dal nuovo schema API di Runalyze
+                    tipo_corsa = run.get('workout_type', 'Base')
+                    sport_praticato = run.get('sport', 'Running')
                     
-                    riga = f"- {run.get('start_date', 'N/D')}: {run.get('name', 'Corsa')} | Tipo: {tipo_corsa} | {distanza_km:.1f}km in {tempo_min}m | Scarpa: {run.get('scarpe', 'N/D')}"
+                    # I dati sono già salvati nelle unità corrette nel DB
+                    distanza_km = run.get('distanza', 0)
+                    tempo_min = int(run.get('tempo_movimento', 0))
+                    
+                    riga = f"- {run.get('start_date', 'N/D')}: {run.get('nome', 'Corsa')} | Sport: {sport_praticato} | Tipo: {tipo_corsa} | {distanza_km:.1f}km in {tempo_min}m | Scarpa: {run.get('scarpe', 'N/D')}"
                     storico_compatto.append(riga)
                 
                 activity_context = "\n".join(storico_compatto)
@@ -72,7 +69,7 @@ class RunningAnalyst:
                 )
             )
 
-            # 5. Configurazione della chiamata all'SDK (usiamo gen_config per non sovrascrivere l'import config)
+            # 5. Configurazione della chiamata all'SDK
             gen_config = genai.types.GenerateContentConfig(
                 system_instruction=full_system_instruction,
                 temperature=0.7
@@ -100,13 +97,15 @@ class RunningAnalyst:
     def analyze_recent_performance(self):
         runs = db.get_recent_runs(limit=10)
         
-        running_data = [r for r in runs if r.get('distance', 0) > 0]
+        # Filtriamo assicurandoci che ci sia distanza e che lo sport sia corsa
+        running_data = [r for r in runs if r.get('distanza', 0) > 0 and r.get('sport', '').lower() == 'running']
         
         if not running_data:
             return "Dati insufficienti per l'analisi (nessuna corsa con distanza rilevata)."
 
+        # I dati nel db sono già in km e minuti
         stats = "\n".join([
-            f"- {r['start_date']}: {r['name']} | {r['distance']/1000:.2f}km | Tempo: {r['moving_time']//60} min"
+            f"- {r.get('start_date', 'N/D')}: {r.get('nome', 'Corsa')} | {r.get('distanza', 0):.2f}km | Tempo: {int(r.get('tempo_movimento', 0))} min"
             for r in running_data
         ])
 
@@ -128,12 +127,12 @@ class RunningAnalyst:
 
         # Formatta la lista delle corse
         dettagli_corse = "\n".join([
-            f"- {r['data']}: {r['nome']} ({r['distanza']} km)"
+            f"- {r.get('data', 'N/D')}: {r.get('nome', 'Corsa')} ({r.get('distanza', 0):.2f} km)"
             for r in lista_corse
         ])
 
         prompt = PROMPT_REPORT_SETTIMANALE.format(
-            km_totali=km_totali,
+            km_totali=f"{km_totali:.2f}",
             dettagli_corse=dettagli_corse
         )
 
@@ -151,7 +150,7 @@ class RunningAnalyst:
         if not dati_corsa:
             return "Nessun dato disponibile per questa attività."
 
-        # 1. Preparazione dei Lap
+        # 1. Preparazione dei Lap (Mantenuto compatibile per implementazioni future di Runalyze)
         laps_info = "Dati lap non disponibili."
         if dati_corsa.get('laps'):
             laps_str_list = []
@@ -167,7 +166,7 @@ class RunningAnalyst:
                 laps_str_list.append(f"Km {i+1}: {pace_str}")
             laps_info = " | ".join(laps_str_list)
 
-        # 2. Conversione Passo Medio Totale
+        # 2. Conversione Passo Medio Totale (Il passo è calcolato in m/s nello script di import)
         passo_medio_ms = dati_corsa.get('passo_medio', 0)
         if passo_medio_ms > 0:
             pace_min_km = 16.6667 / passo_medio_ms
@@ -182,15 +181,15 @@ class RunningAnalyst:
         if not note:
             note = "Nessun obiettivo o struttura specificata nelle note private."
 
-        # 4. Compilazione del prompt usando le chiavi estratte in strava_client.py
+        # 4. Compilazione del prompt usando le chiavi estratte in runalyze_client.py
         prompt = PROMPT_ANALISI_CORSA.format(
-            nome=dati_corsa['nome'],
-            distanza=dati_corsa['distanza'],
-            tempo_movimento=dati_corsa['tempo_movimento'],
+            nome=dati_corsa.get('nome', 'Corsa'),
+            distanza=dati_corsa.get('distanza', 0),
+            tempo_movimento=dati_corsa.get('tempo_movimento', 0),
             passo_medio_str=passo_medio_str,
-            bpm_medi=dati_corsa['bpm_medi'],
-            dislivello=dati_corsa['dislivello'],
-            scarpe=dati_corsa['scarpe'],
+            bpm_medi=dati_corsa.get('bpm_medi', 'N/D'),
+            dislivello=dati_corsa.get('dislivello', 0),
+            scarpe=dati_corsa.get('scarpe', 'N/D'),
             note=note,
             laps_info=laps_info
         )
@@ -209,7 +208,9 @@ class RunningAnalyst:
         nome = gear_details.get('name', 'Scarpa')
         brand = gear_details.get('brand_name', 'Sconosciuto')
         model_name = gear_details.get('model_name', 'Sconosciuto')
-        km_attuali = gear_details.get('distance', 0) / 1000
+        
+        # L'API di Runalyze restituisce già il chilometraggio in KM
+        km_attuali = gear_details.get('distance', 0)
         
         peso_info = f"{peso_atleta} kg" if peso_atleta else "N/D (considera un peso medio di 70-75 kg)"
 
