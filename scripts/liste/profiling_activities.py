@@ -45,7 +45,7 @@ def select_all():
     firestore_client = db.db
     
     # 2. Questa è la vera e propria "SELECT * FROM activities"
-    corse_ref = firestore_client.collection("attivita").where("workout_type", "==", "Interval training").stream()
+    corse_ref = firestore_client.collection("attivita").where("sport", "==", "Allenamento della forza").order_by("start_date", direction="DESCENDING").stream()
 
     # 3. I dati arrivano grezzi, dobbiamo "scartarli" ed estrarli
     risultati = []

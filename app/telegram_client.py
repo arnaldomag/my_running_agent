@@ -26,9 +26,27 @@ class TelegramNotifier:
             payload["reply_markup"] = json.dumps(reply_markup)
 
         try:
-            response = requests.post(self.api_url, data=payload) # Usiamo data invece di json per gestire la stringa
+            # 1. PRIMO TENTATIVO: Invio con formattazione HTML
+            response = requests.post(self.api_url, data=payload)
+            
+            # Se Telegram rifiuta il pacchetto per via di tag HTML rotti (Errore 400)
+            if response.status_code == 400:
+                print(f"⚠️ [TELEGRAM] Errore di formattazione HTML rilevato ({response.text}). Attivazione Fallback...")
+                
+                # Rimuoviamo il vincolo HTML
+                payload.pop("parse_mode", None)
+                
+                # 2. SECONDO TENTATIVO: Invio come testo semplice
+                fallback_response = requests.post(self.api_url, data=payload)
+                fallback_response.raise_for_status() # Solleva errore se fallisce anche questo
+                
+                print("✅ Messaggio di emergenza inviato con successo (senza HTML).")
+                return True
+                
+            # Se la richiesta originale ha dato un errore diverso (es. 401 Unauthorized), lo solleva
             response.raise_for_status() 
             return True
+            
         except requests.exceptions.RequestException as e:
             print(f"❌ Errore nell'invio a Telegram: {e}")
             return False
