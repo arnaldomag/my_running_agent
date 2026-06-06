@@ -110,6 +110,9 @@ def telegram_webhook():
                     orchestrator.handle_dashboard_view(chat_id)
                 elif testo_lower.startswith('/syncstorico'):
                     orchestrator.handle_sync_storico(testo)
+                elif testo_lower == '/sync':
+                    # ECCO IL NUOVO COMANDO!
+                    threading.Thread(target=orchestrator.handle_sync_incrementale).start()
                 elif testo_lower.startswith('/pianifica'):
                     orchestrator.handle_plan_creation(testo)
                 elif testo_lower == '/piano':
