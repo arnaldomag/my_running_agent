@@ -10,6 +10,7 @@ import hashlib
 from urllib.parse import parse_qsl
 import hmac
 from collections import deque
+import threading
 
 app = Flask(__name__)
 
@@ -120,7 +121,13 @@ def telegram_webhook():
                 return jsonify({"status": "ok"}), 200
 
             # B) Chat libera con l'Intelligenza Artificiale (MessageHandler)
-            orchestrator.handle_chat_ai(chat_id, testo)
+            # orchestrator.handle_chat_ai(chat_id, testo)
+
+            # NUOVO CODICE: Creiamo un thread in background
+            thread = threading.Thread(target=orchestrator.handle_chat_ai, args=(chat_id, testo))
+            thread.start()
+            
+            # Restituiamo SUBITO l'OK a Telegram in 1 millisecondo
             return jsonify({"status": "ok"}), 200
 
         # ==================================================
@@ -143,7 +150,8 @@ def telegram_webhook():
             
             if callback_data.startswith('analyze_'):
                 activity_id = callback_data.replace('analyze_', '')
-                orchestrator.process_run_analysis(activity_id)
+                # orchestrator.process_run_analysis(activity_id)
+                threading.Thread(target=orchestrator.process_run_analysis, args=(activity_id,)).start()
                 
             elif callback_data == 'fallback_last_week_show':
                 orchestrator.process_fallback_weekly_report()
