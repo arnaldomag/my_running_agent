@@ -20,49 +20,77 @@ class RunalyzeClient:
     # ==========================================
     # 2. PIPELINE DI SINCRONIZZAZIONE (FIRESTORE)
     # ==========================================
-    def sync_latest_activities(self, db_instance, limit=30):
-        """Sync leggero e veloce delle ultime N attività per aggiornare modifiche recenti"""
+    def sync_new_activities(self, db_instance):
+        """Sync Incrementale: Scarica solo le attività non ancora presenti su Firestore."""
         try:
-            url = f"{self.base_url}/activity?page=1&itemsPerPage={limit}"
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            activities = response.json()
+            print("🔄 [RUNALYZE] Avvio sync incrementale (ricerca nuove attività)...")
+            collection_ref = db_instance.db.collection("attivita")
+            page = 1
+            items_per_page = 50
+            attivita_salvate = 0
+            fermati = False
 
-            for act in activities:
-                # NESSUN FILTRO: Estraiamo tutte le attività a prescindere dallo sport
-                distanza_km = float(act.get("distance", 0))
-                tempo_sec = int(act.get("duration", 0))
-                passo_ms = ((distanza_km * 1000) / tempo_sec) if tempo_sec > 0 else 0
+            while not fermati:
+                url = f"{self.base_url}/activity?page={page}&itemsPerPage={items_per_page}"
+                response = requests.get(url, headers=self.headers)
+                response.raise_for_status()
+                activities = response.json()
 
-                equip_list = act.get('equipment', [])
-                scarpe = ", ".join([e.get('name', 'Sconosciuta') for e in equip_list]) if equip_list else "Non specificate"
+                if not activities:
+                    break
 
-                run_data = {
-                    "id": str(act.get("id")),
-                    "nome": act.get("title", "Allenamento"),
-                    "sport": act.get("sport", {}).get("name", "Generico"),
-                    "workout_type": act.get("type", {}).get("name", "N/D"),
-                    "distanza": distanza_km,
-                    "tempo_movimento": tempo_sec / 60,
-                    "passo_medio": passo_ms, 
-                    "bpm_medi": act.get("hr_avg", "N/D"),
-                    "dislivello": act.get("elevation_up", 0),
-                    "scarpe": scarpe,
-                    "note_private": act.get("note", ""),
-                    "start_date": self._format_date(act.get("date_time", "")),
-                    "laps": []
-                }
-                
-                db_instance.db.collection("attivita").document(str(act['id'])).set(run_data, merge=True)
-            return True
+                for act in activities:
+                    id_attivita = str(act.get("id"))
+                    
+                    # -----------------------------------------------------
+                    # EARLY EXIT: Se l'ID esiste già, fermiamo il ciclo!
+                    # -----------------------------------------------------
+                    if collection_ref.document(id_attivita).get().exists:
+                        print(f"🛑 Attività {id_attivita} già presente. Sincronizzazione terminata.")
+                        fermati = True
+                        break
+
+                    # Elaborazione Dati (Nessun filtro sportivo)
+                    distanza_km = float(act.get("distance", 0))
+                    tempo_sec = int(act.get("duration", 0))
+                    passo_ms = ((distanza_km * 1000) / tempo_sec) if tempo_sec > 0 else 0
+
+                    equip_list = act.get('equipment', [])
+                    scarpe = ", ".join([e.get('name', 'Sconosciuta') for e in equip_list]) if equip_list else "Non specificate"
+
+                    run_data = {
+                        "id": id_attivita,
+                        "nome": act.get("title", "Allenamento"),
+                        "sport": act.get("sport", {}).get("name", "Generico"),
+                        "workout_type": act.get("type", {}).get("name", "N/D"),
+                        "distanza": distanza_km,
+                        "tempo_movimento": tempo_sec / 60,
+                        "passo_medio": passo_ms, 
+                        "bpm_medi": act.get("hr_avg", "N/D"),
+                        "dislivello": act.get("elevation_up", 0),
+                        "scarpe": scarpe,
+                        "note_private": act.get("note", ""),
+                        "start_date": self._format_date(act.get("date_time", "")),
+                        "laps": []
+                    }
+                    
+                    collection_ref.document(id_attivita).set(run_data, merge=True)
+                    attivita_salvate += 1
+
+                if len(activities) < items_per_page:
+                    break
+                page += 1
+
+            print(f"✅ [RUNALYZE] Sync incrementale completato: {attivita_salvate} nuove attività aggiunte.")
+            return attivita_salvate
         except Exception as e:
-            print(f"⚠️ [RUNALYZE] Mini-sync fallito: {e}")
-            return False
+            print(f"⚠️ [RUNALYZE] Errore nel sync incrementale: {e}")
+            return 0
 
     def sync_historical_data_by_year(self, db_instance, year):
-        """Scarica tutte le attività di un anno specifico e le salva su Firestore"""
+        """Sync Storico: Scarica tutte le attività di un anno specifico sovrascrivendo i dati."""
         try:
-            print(f"🔄 [RUNALYZE] Avvio sync storico per l'anno {year} sulla tabella 'attivita'...")
+            print(f"🔄 [RUNALYZE] Avvio sync storico per l'anno {year}...")
             corse_salvate = 0
             page = 1
             items_per_page = 100
@@ -89,7 +117,6 @@ class RunalyzeClient:
                         break
                     
                     if corsa_year == year:
-                        # NESSUN FILTRO
                         distanza_km = float(act.get("distance", 0))
                         tempo_sec = int(act.get("duration", 0))
                         passo_ms = ((distanza_km * 1000) / tempo_sec) if tempo_sec > 0 else 0
@@ -126,23 +153,14 @@ class RunalyzeClient:
             return 0
 
     # ==========================================
-    # 3. LETTURE LIVE DA RUNALYZE (Dettagli AI)
+    # 3. LETTURE LIVE DA RUNALYZE (Non toccano il DB)
     # ==========================================
     def fetch_athlete_shoes(self):
         url = f"{self.base_url}/equipment"
         try:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
-            equipment_data = response.json()
-
-            scarpe = []
-            for item in equipment_data:
-                scarpe.append({
-                    'id': item.get('id'),
-                    'name': item.get('name', 'Scarpa'),
-                    'distance': item.get('distance', 0)
-                })
-            return scarpe
+            return [{'id': item.get('id'), 'name': item.get('name', 'Scarpa'), 'distance': item.get('distance', 0)} for item in response.json()]
         except requests.exceptions.RequestException as e:
             print(f"❌ Errore nel recupero della scarpiera: {e}")
             return []
@@ -152,17 +170,11 @@ class RunalyzeClient:
         try:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
-            data = response.json()
-            for item in data:
+            for item in response.json():
                 if str(item.get('id')) == str(gear_id):
-                    return {
-                        'id': item['id'],
-                        'name': item['name'],
-                        'distance': item.get('distance', 0)
-                    }
+                    return {'id': item['id'], 'name': item['name'], 'distance': item.get('distance', 0)}
             return None
         except requests.exceptions.RequestException as e:
-            print(f"❌ Errore nel recupero dei dettagli scarpa {gear_id}: {e}")
             return None
 
     def fetch_activity_details(self, activity_id):
@@ -171,20 +183,16 @@ class RunalyzeClient:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
             data = response.json()
+            if not data: return None
             
-            if not data:
-                return None
-                
             act = data[0]
-
             distanza_km = float(act.get("distance", 0))
             tempo_sec = int(act.get("duration", 0))
             passo_ms = ((distanza_km * 1000) / tempo_sec) if tempo_sec > 0 else 0
-
             equip_list = act.get('equipment', [])
             scarpe = ", ".join([e.get('name', 'Sconosciuta') for e in equip_list]) if equip_list else "Non specificate"
 
-            data_pulita = {
+            return {
                 "id": str(act.get("id")),
                 "nome": act.get("title", "Allenamento"),
                 "sport": act.get("sport", {}).get("name", "Sconosciuto"),
@@ -199,34 +207,21 @@ class RunalyzeClient:
                 "start_date": self._format_date(act.get("date_time", "")),
                 "laps": []
             }
-            return data_pulita
-
         except requests.exceptions.RequestException as e:
-            print(f"❌ Errore nel recupero del dettaglio attività {activity_id}: {e}")
             return None
 
-    # ==========================================
-    # 4. METODI FALLBACK / LEGACY
-    # ==========================================
     def fetch_last_active_week(self):
         try:
             url = f"{self.base_url}/activity?page=1&itemsPerPage=30"
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
-            activities = response.json()
+            runs = response.json()
+            if not runs: return [], 0, None, None
 
-            # Nessun filtro
-            runs = activities
-            if not runs:
-                return [], 0, None, None
-
-            ultima_corsa = runs[0]
-            dt_str = ultima_corsa.get('date_time', '')
-            if not dt_str:
-                return [], 0, None, None
+            dt_str = runs[0].get('date_time', '')
+            if not dt_str: return [], 0, None, None
                 
             run_date = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-
             start_of_week = run_date - timedelta(days=run_date.weekday())
             start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
             end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
@@ -236,8 +231,7 @@ class RunalyzeClient:
 
             for run in runs:
                 r_date_str = run.get('date_time', '')
-                if not r_date_str:
-                    continue
+                if not r_date_str: continue
                 r_date = datetime.strptime(r_date_str, "%Y-%m-%d %H:%M:%S")
                 
                 if start_of_week <= r_date <= end_of_week:
@@ -254,10 +248,7 @@ class RunalyzeClient:
 
             settimana_attiva.reverse()
             return settimana_attiva, km_totali, start_of_week, end_of_week
-
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Errore nel recupero della settimana attiva retroattiva: {e}")
+        except requests.exceptions.RequestException:
             return [], 0, None, None
-
 
 runalyze_client = RunalyzeClient()

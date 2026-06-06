@@ -35,6 +35,17 @@ class BotOrchestrator:
         else:
             self.notifier.send_message("⚠️ Formato del comando non valido. Per favore usa la sintassi: /syncstorico [anno] (es. /syncstorico 2026)")
 
+    def handle_sync_incrementale(self):
+        """Gestisce il comando /sync per scaricare solo le novità"""
+        self.notifier.send_message("⏳ Controllo il radar di Runalyze alla ricerca di nuovi allenamenti...")
+        
+        nuove_attivita = self.runalyze_client.sync_new_activities(self.db)
+        
+        if nuove_attivita > 0:
+            self.notifier.send_message(f"✅ <b>Sincronizzazione completata!</b>\nHo aggiunto {nuove_attivita} nuove attività al tuo database.")
+        else:
+            self.notifier.send_message("✅ <b>Sei già perfettamente allineato!</b>\nNon ci sono nuove attività da scaricare.")
+
     def handle_chat_ai(self, chat_id, testo):
         """Dirotta i messaggi liberi all'intelligenza artificiale iniettando contesto extra"""
         print(f"💬 [ORCHESTRATOR] Dirottamento chat_id {chat_id} verso l'AI Agent...")
@@ -320,7 +331,7 @@ class BotOrchestrator:
     def process_cron_weekly_report(self):
         try:
             print("⏰ [ORCHESTRATOR] Avvio report settimanale schedulato...")
-            self.runalyze_client.sync_latest_activities(self.db, limit=30)
+            self.runalyze_client.sync_new_activities(self.db)
 
             oggi = date.today()
             giorno_settimana = oggi.weekday()
@@ -442,7 +453,7 @@ class BotOrchestrator:
     def process_fallback_weekly_report(self):
         try:
             print("📅 [ORCHESTRATOR] Avvio recupero settimana di fallback...")
-            self.runalyze_client.sync_latest_activities(self.db, limit=30)
+            self.runalyze_client.sync_new_activities(self.db)
             
             self.notifier.send_message("🔍 Alla ricerca dell'ultimo periodo attivo su Runalyze...")
             lista_corse, km_totali, start_date, end_date = self.runalyze_client.fetch_last_active_week()

@@ -9,8 +9,8 @@ from app.telegram_client import notifier
 def sync_activities():
     print("🔄 Sincronizzazione attività da Runalyze...")
     try:
-        # Il nuovo metodo sync_latest_activities fa già tutto: scarica, mappa e salva su Firestore
-        if runalyze_client.sync_latest_activities(db, limit=5):
+        # Il nuovo metodo sync_new_activities fa già tutto: scarica, mappa e salva su Firestore
+        if runalyze_client.sync_new_activities(db):
             print("✅ Sincronizzazione rapida completata con successo.")
         else:
             print("⚠️ Sincronizzazione completata con qualche anomalia.")
