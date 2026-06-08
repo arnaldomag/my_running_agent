@@ -47,41 +47,70 @@ class BotOrchestrator:
             self.notifier.send_message("✅ <b>Sei già perfettamente allineato!</b>\nNon ci sono nuove attività da scaricare.")
 
     def handle_chat_ai(self, chat_id, testo):
-        """Dirotta i messaggi liberi all'intelligenza artificiale iniettando contesto extra"""
-        print(f"💬 [ORCHESTRATOR] Dirottamento chat_id {chat_id} verso l'AI Agent...")
+        """Dirotta i messaggi liberi alla chat arricchendola con tutto il patrimonio informativo di Firestore"""
+        print(f"💬 [ORCHESTRATOR] Raccolta contesto Omni-Agent per chat_id {chat_id}...")
         self.notifier.send_message("✍️ L'agente sta elaborando la risposta...")
         
-        # 1. Recupero l'ultimo peso registrato
-        dati_dashboard = self.get_dashboard_metrics()
-        peso_attuale = 0
-        if dati_dashboard.get("status") == "success":
-            peso_attuale = dati_dashboard.get("data", {}).get("latest_weight", 0)
+        try:
+            # 1. Recupero metriche corporee complete (usando return_full_dict=True)
+            dati_corporei = self.db.get_latest_weight(return_full_dict=True)
+            testo_metriche = "Dati biometrici non disponibili."
             
-        # 2. Recupero il Piano Settimanale Attuale da Firestore
-        piano = self.db.get_weekly_plan()
-        testo_piano = ""
-        
-        if piano and piano.get("sessions"):
-            testo_piano = "[CONTESTO INVISIBILE: PIANO SETTIMANALE PROGRAMMATO]\n"
-            for s in piano["sessions"]:
-                stato = "✅ COMPLETATA" if s["status"] == "done" else "🟡 DA FARE"
-                # Uniamo gli step in un'unica stringa leggibile
-                steps_str = " | ".join(s.get("steps", []))
-                testo_piano += f"- {s['name']} [{stato}]: {steps_str}\n"
-            testo_piano += "[FINE PIANO SETTIMANALE]\n\n"
+            if dati_corporei:
+                testo_metriche = (
+                    f"Data misurazione: {dati_corporei.get('data', 'N/D')}\n"
+                    f"- Peso: {dati_corporei.get('peso_kg', 'N/D')} kg\n"
+                    f"- Massa Grassa: {dati_corporei.get('massa_grassa_percentuale', 'N/D')}%\n"
+                    f"- Massa Muscolare: {dati_corporei.get('massa_muscolare_percentuale', 'N/D')}%\n"
+                    f"- Massa Ossea: {dati_corporei.get('massa_ossea_percentuale', 'N/D')}%\n"
+                    f"- Massa Idrica: {dati_corporei.get('massa_idrica_percentuale', 'N/D')}%"
+                )
+                
+            # 2. Recupero del piano settimanale corrente
+            piano = self.db.get_weekly_plan()
+            testo_piano = "Nessun piano programmato per questa settimana."
+            if piano and piano.get("sessions"):
+                linee_piano = []
+                for s in piano["sessions"]:
+                    stato = "✅ COMPLETATA" if s["status"] == "done" else "🟡 DA FARE"
+                    steps_str = " | ".join(s.get("steps", []))
+                    linee_piano.append(f"- {s['name']} [{stato}]: {steps_str}")
+                testo_piano = "\n".join(linee_piano)
+                
+            # 3. Recupero storico recente delle attività (ultime 5, universale su tutti gli sport)
+            recent_runs = self.db.get_recent_runs(limit=5)
+            testo_attivita = "Nessuna attività registrata di recente nel database."
+            if recent_runs:
+                linee_attivita = []
+                for r in recent_runs:
+                    # Estraiamo in modo sicuro le chiavi allineate al nuovo database.py
+                    data_pulita = r.get('start_date', 'N/D')[:10] if r.get('start_date') else 'N/D'
+                    linee_attivita.append(
+                        f"- {data_pulita} | {r.get('nome', 'Allenamento')} | "
+                        f"Sport: {r.get('sport', 'Running')} | Tipo: {r.get('workout_type', 'Base')} | "
+                        f"{r.get('distanza', 0):.2f}km in {int(r.get('tempo_movimento', 0))} min | "
+                        f"Scarpa: {r.get('scarpe', 'N/D')}"
+                    )
+                testo_attivita = "\n".join(linee_attivita)
+                
+            # 4. Consolidamento finale dell'Omni-Context String
+            context_string = f"""[PARAMETRI BIOMETRICI ATLETA]
+{testo_metriche}
+
+[PIANIFICAZIONE SETTIMANALE ATTUALE]
+{testo_piano}
+
+[CRONOLOGIA ULTIME 5 ATTIVITÀ REGISTRATE]
+{testo_attivita}"""
+
+            # 5. Invocazione dell'unico metodo dell'analyst passando la domanda originale e il contesto
+            risposta_agente = self.analyst.chat_omni_agent(chat_id, testo, context_string)
             
-        # 3. Prepariamo il messaggio "arricchito" unendo tutti i contesti
-        contesto_invisibile = testo_piano
-        
-        if peso_attuale > 0:
-            contesto_invisibile += f"[CONTESTO INVISIBILE: L'ultimo peso corporeo registrato è {peso_attuale} kg.]\n\n"
+            self.notifier.send_message(risposta_agente)
             
-        testo_arricchito = f"{contesto_invisibile}Domanda dell'utente: {testo}"
-            
-        # 4. Chiamata al metodo dell'analyst, che inietta le corse Runalyze reali
-        risposta_agente = self.analyst.chat_with_runalyze_context(chat_id, testo_arricchito)
-        
-        self.notifier.send_message(risposta_agente)
+        except Exception as e:
+            print(f"💥 [ORCHESTRATOR] Errore nella compilazione del contesto della chat: {e}")
+            self.notifier.send_message("❌ Si è verificato un errore durante l'allineamento dei dati di contesto.")
 
     def handle_unrecognized_command(self):
         self.notifier.send_message("Comando non riconosciuto. Puoi provare con /scarpe o /syncstorico 2026 o /pianifica o /piano o scrivermi semplicemente un messaggio per parlare del tuo allenamento!")
