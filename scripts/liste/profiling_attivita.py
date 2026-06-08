@@ -64,5 +64,5 @@ def select_all():
     
 if __name__ == "__main__":
     # Assicurati di aver installato pandas: pip install pandas
-    # analizza_struttura()
-    select_all()
+    analizza_struttura()
+    # select_all()
