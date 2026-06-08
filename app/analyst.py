@@ -1,83 +1,49 @@
+# app/analyst.py
 from google import genai
+import google.genai.types as types
 from .config import config
 from .database import db
 import PIL.Image
 import io
 import json
-import google.genai.types as types
 
-# Importiamo i nostri prompt come costanti
-from .prompts import (
-    PROMPT_CHAT_SISTEMA,
-    PROMPT_RECENT_PERFORMANCE,
-    PROMPT_REPORT_SETTIMANALE,
-    PROMPT_ANALISI_CORSA,
-    PROMPT_ANALISI_SCARPA,
-    PROMPT_OCR_BILANCIA
-)
+from .prompts import PROMPT_OMNI_AGENT, PROMPT_OCR_BILANCIA
 
 class RunningAnalyst:
     def __init__(self):
-        # 1. Recupera la API Key
         api_key = config.get_secret("GEMINI_API_KEY")
-        
         if not api_key:
-            raise ValueError("GEMINI_API_KEY mancante. Inseriscila nel .env o in Secret Manager.")
+            raise ValueError("GEMINI_API_KEY mancante. Controlla le variabili d'ambiente.")
 
-        # 2. Inizializza il client Globale
         self.client = genai.Client(api_key=api_key)
-        
-        # 3. Usiamo la versione stabile e globale
         self.model_id = "gemini-3.5-flash"
 
-    def chat_with_runalyze_context(self, chat_id, user_text):
-        """Gestisce una conversazione fluida iniettando lo storico allenamenti come system instruction"""
+    def chat_omni_agent(self, chat_id, user_text, context_string):
+        """Unico punto di ingresso per l'analisi testuale. Gestisce la chat iniettando tutto il contesto."""
         try:
-            # 1. Recupero dinamico
-            recent_runs = db.get_recent_runs(limit=100)
-            
-            if recent_runs:
-                storico_compatto = []
-                
-                for run in recent_runs:
-                    # Estrazione diretta delle stringhe dal nuovo schema API di Runalyze
-                    tipo_corsa = run.get('workout_type', 'Base')
-                    sport_praticato = run.get('sport', 'Running')
-                    
-                    # I dati sono già salvati nelle unità corrette nel DB
-                    distanza_km = run.get('distanza', 0)
-                    tempo_min = int(run.get('tempo_movimento', 0))
-                    
-                    riga = f"- {run.get('start_date', 'N/D')}: {run.get('nome', 'Corsa')} | Sport: {sport_praticato} | Tipo: {tipo_corsa} | {distanza_km:.1f}km in {tempo_min}m | Scarpa: {run.get('scarpe', 'N/D')}"
-                    storico_compatto.append(riga)
-                
-                activity_context = "\n".join(storico_compatto)
-            else:
-                activity_context = "Nessun allenamento recente trovato nel database."
+            # 1. Iniettiamo il mega-stringone di contesto generato dall'orchestratore
+            full_system_instruction = PROMPT_OMNI_AGENT.format(context_string=context_string)
 
-            # 2. Configurazione della System Instruction dinamica formattata dal prompt pulito
-            full_system_instruction = PROMPT_CHAT_SISTEMA.format(activity_context=activity_context)
-
-            # 3. Lettura dello stato precedente da Firestore
+            # 2. Recuperiamo la cronologia da Firestore (memoria storica dei messaggi)
             contents, history_dicts = db.get_chat_history(chat_id)
 
-            # 4. Aggiunta del nuovo input dell'utente
+            # 3. Appendiamo l'ultimo messaggio dell'utente alla lista dell'SDK
             contents.append(
-                genai.types.Content(
+                types.Content(
                     role="user",
-                    parts=[genai.types.Part.from_text(text=user_text)]
+                    parts=[types.Part.from_text(text=user_text)]
                 )
             )
 
-            # 5. Configurazione della chiamata all'SDK
-            gen_config = genai.types.GenerateContentConfig(
+            # 4. Configurazione dei parametri di generazione
+            gen_config = types.GenerateContentConfig(
                 system_instruction=full_system_instruction,
                 temperature=0.7
             )
 
-            print(f"🧠 [ANALYST] Invio sessione chat a {self.model_id} (History size: {len(contents)})")
+            print(f"🧠 [ANALYST] Chiamata Omni-Agent (Modello: {self.model_id} | Turni History: {len(contents)})")
             
-            # Eseguiamo la chiamata
+            # 5. Richiesta all'SDK ufficiale
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=contents,
@@ -85,184 +51,31 @@ class RunningAnalyst:
             )
             bot_reply = response.text
 
-            # 6. Salvataggio asincrono su Firestore
+            # 6. Salvataggio della nuova interazione su Firestore per non perdere la memoria al prossimo turno
             db.save_chat_interaction(chat_id, history_dicts, user_text, bot_reply)
 
             return bot_reply
 
         except Exception as e:
-            print(f"❌ [ANALYST] Errore nella pipeline della chat AI: {e}")
-            return "Scusami, ho riscontrato un problema tecnico nel processare i nostri messaggi. Riprova tra poco!"
-
-    def analyze_recent_performance(self):
-        runs = db.get_recent_runs(limit=10)
-        
-        # Filtriamo assicurandoci che ci sia distanza e che lo sport sia corsa
-        running_data = [r for r in runs if r.get('distanza', 0) > 0 and r.get('sport', '').lower() == 'running']
-        
-        if not running_data:
-            return "Dati insufficienti per l'analisi (nessuna corsa con distanza rilevata)."
-
-        # I dati nel db sono già in km e minuti
-        stats = "\n".join([
-            f"- {r.get('start_date', 'N/D')}: {r.get('nome', 'Corsa')} | {r.get('distanza', 0):.2f}km | Tempo: {int(r.get('tempo_movimento', 0))} min"
-            for r in running_data
-        ])
-
-        prompt = PROMPT_RECENT_PERFORMANCE.format(stats=stats)
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            return f"Errore durante la generazione del feedback: {e}"
-
-    def analyze_weekly_summary(self, lista_corse, km_totali):
-        """Genera un'analisi aggregata per la settimana in corso"""
-        if not lista_corse:
-            return "Nessuna corsa registrata questa settimana. Ottimo momento per pianificare la prossima uscita!"
-
-        # Formatta la lista delle corse
-        dettagli_corse = "\n".join([
-            f"- {r.get('data', 'N/D')}: {r.get('nome', 'Corsa')} ({r.get('distanza', 0):.2f} km)"
-            for r in lista_corse
-        ])
-
-        prompt = PROMPT_REPORT_SETTIMANALE.format(
-            km_totali=f"{km_totali:.2f}",
-            dettagli_corse=dettagli_corse
-        )
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            return f"Errore durante la generazione del report settimanale: {e}"
-        
-    def analyze_single_run(self, dati_corsa):
-        """Genera un'analisi profonda di una singola corsa confrontando target e realtà"""
-        if not dati_corsa:
-            return "Nessun dato disponibile per questa attività."
-
-        # 1. Preparazione dei Lap (Mantenuto compatibile per implementazioni future di Runalyze)
-        laps_info = "Dati lap non disponibili."
-        if dati_corsa.get('laps'):
-            laps_str_list = []
-            for i, lap in enumerate(dati_corsa['laps'][:15]):
-                passo_lap_ms = lap.get('average_speed', 0)
-                if passo_lap_ms > 0:
-                    pace_min_km = 16.6667 / passo_lap_ms
-                    mins = int(pace_min_km)
-                    secs = int((pace_min_km - mins) * 60)
-                    pace_str = f"{mins}:{secs:02d}"
-                else:
-                    pace_str = "N/D"
-                laps_str_list.append(f"Km {i+1}: {pace_str}")
-            laps_info = " | ".join(laps_str_list)
-
-        # 2. Conversione Passo Medio Totale (Il passo è calcolato in m/s nello script di import)
-        passo_medio_ms = dati_corsa.get('passo_medio', 0)
-        if passo_medio_ms > 0:
-            pace_min_km = 16.6667 / passo_medio_ms
-            mins = int(pace_min_km)
-            secs = int((pace_min_km - mins) * 60)
-            passo_medio_str = f"{mins}:{secs:02d} min/km"
-        else:
-            passo_medio_str = "N/D"
-
-        # 3. Gestione Note Private vuote
-        note = dati_corsa.get('note_private', '').strip()
-        if not note:
-            note = "Nessun obiettivo o struttura specificata nelle note private."
-
-        # 4. Compilazione del prompt usando le chiavi estratte in runalyze_client.py
-        prompt = PROMPT_ANALISI_CORSA.format(
-            nome=dati_corsa.get('nome', 'Corsa'),
-            distanza=dati_corsa.get('distanza', 0),
-            tempo_movimento=dati_corsa.get('tempo_movimento', 0),
-            passo_medio_str=passo_medio_str,
-            bpm_medi=dati_corsa.get('bpm_medi', 'N/D'),
-            dislivello=dati_corsa.get('dislivello', 0),
-            scarpe=dati_corsa.get('scarpe', 'N/D'),
-            note=note,
-            laps_info=laps_info
-        )
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            return f"Errore durante l'analisi della singola corsa: {e}"
-
-    def analyze_shoe(self, gear_details, peso_atleta=None):
-        """Analizza l'usura e le caratteristiche tecniche della scarpa"""
-        nome = gear_details.get('name', 'Scarpa')
-        brand = gear_details.get('brand_name', 'Sconosciuto')
-        model_name = gear_details.get('model_name', 'Sconosciuto')
-        
-        # L'API di Runalyze restituisce già il chilometraggio in KM
-        km_attuali = gear_details.get('distance', 0)
-        
-        peso_info = f"{peso_atleta} kg" if peso_atleta else "N/D (considera un peso medio di 70-75 kg)"
-
-        prompt = PROMPT_ANALISI_SCARPA.format(
-            nome=nome,
-            brand=brand,
-            model_name=model_name,
-            km_attuali=km_attuali,
-            peso_info=peso_info
-        )
-
-        try:
-            risposta = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt
-            )
-            return risposta.text
-        except Exception as e:
-            print(f"Errore Gemini durante analisi scarpa: {e}")
-            return f"❌ Impossibile generare l'analisi per questa scarpa: {e}"
+            print(f"❌ [ANALYST] Errore critico nel motore Omni-Agent: {e}")
+            return "Scusami, ho riscontrato un'anomalia temporanea nell'elaborare i dati. Puoi riprovare tra un attimo?"
 
     def extract_body_metrics_from_image(self, image_bytes):
-        """Utilizza Gemini Flash per estrarre le metriche corporee e restituirle in JSON"""
+        """Estrattore OCR tramite Vision Engine."""
         try:
             image = PIL.Image.open(io.BytesIO(image_bytes))
-            
-            print("🧠 [ANALYST] Invio screenshot a Gemini Flash per estrazione JSON...")
+            print("🧠 [ANALYST] Invio screenshot bilancia a Gemini...")
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=[PROMPT_OCR_BILANCIA, image]
             )
             
-            json_text = response.text.strip()
-            if json_text.startswith("```json"):
-                json_text = json_text[7:]
-            if json_text.startswith("```"):
-                json_text = json_text[3:]
-            if json_text.endswith("```"):
-                json_text = json_text[:-3]
-                
-            json_text = json_text.strip()
-            
-            try:
-                dati_corporei = json.loads(json_text)
-                print(f"✅ [ANALYST] Metriche estratte: {dati_corporei}")
-                return dati_corporei
-            except json.JSONDecodeError as e:
-                print(f"⚠️ [ANALYST] Errore di decodifica JSON. Risposta grezza: {json_text}")
-                return None
-                
+            json_text = response.text.replace("```json", "").replace("```", "").strip()
+            dati_corporei = json.loads(json_text)
+            print(f"✅ [ANALYST] Metriche estratte con successo: {dati_corporei}")
+            return dati_corporei
         except Exception as e:
-            print(f"❌ [ANALYST] Errore durante analisi ottica: {e}")
+            print(f"❌ [ANALYST] Errore durante l'analisi ottica dell'immagine: {e}")
             return None
 
 analyst = RunningAnalyst()
