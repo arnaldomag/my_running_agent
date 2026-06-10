@@ -8,8 +8,8 @@ class RunalyzeMCPBridge:
     def __init__(self, token, gemini_client, model_id="gemini-3.5-flash"):
         self.url = "https://runalyze.com/mcp"
         # Runalyze di solito accetta il token direttamente nell'header 'token' 
-        # (In alternativa, potresti dover usare: {"Authorization": f"Bearer {token}"})
-        self.headers = {"token": token} 
+        # (In alternativa, potresti dover usare: {"token": token})
+        self.headers = {"Authorization": f"Bearer {token}"} 
         self.gemini_client = gemini_client
         self.model_id = model_id
 
