@@ -9,7 +9,8 @@ class RunalyzeMCPBridge:
         self.url = "https://runalyze.com/mcp"
         # Runalyze di solito accetta il token direttamente nell'header 'token' 
         # (In alternativa, potresti dover usare: {"token": token})
-        self.headers = {"Authorization": f"Bearer {token}"} 
+        clean_token = token.strip() if token else ""
+        self.headers = {"Authorization": f"Bearer {clean_token}"} 
         self.gemini_client = gemini_client
         self.model_id = model_id
 
