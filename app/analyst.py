@@ -1,6 +1,5 @@
 # app/analyst.py
 from google import genai
-import traceback
 import google.genai.types as types
 from .config import config
 from .database import db
@@ -46,7 +45,7 @@ class RunningAnalyst:
         except Exception as e:
             # MODIFICATO: Questo stamperà l'errore reale nascosto nel TaskGroup nei log di Cloud Run
             print("💥 [CRITICAL] Traceback dettagliato dell'errore MCP:")
-            traceback.print_exc()
+            # traceback.print_exc()
             
             return "C'è stata un'anomalia di connessione con Runalyze. Dammi un minuto e riproviamo."
 
