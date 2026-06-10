@@ -77,33 +77,14 @@ class BotOrchestrator:
                     linee_piano.append(f"- {s['name']} [{stato}]: {steps_str}")
                 testo_piano = "\n".join(linee_piano)
                 
-            # 3. Recupero storico recente delle attività (ultime 5, universale su tutti gli sport)
-            recent_runs = self.db.get_recent_runs(limit=5)
-            testo_attivita = "Nessuna attività registrata di recente nel database."
-            if recent_runs:
-                linee_attivita = []
-                for r in recent_runs:
-                    # Estraiamo in modo sicuro le chiavi allineate al nuovo database.py
-                    data_pulita = r.get('start_date', 'N/D')[:10] if r.get('start_date') else 'N/D'
-                    linee_attivita.append(
-                        f"- {data_pulita} | {r.get('nome', 'Allenamento')} | "
-                        f"Sport: {r.get('sport', 'Running')} | Tipo: {r.get('workout_type', 'Base')} | "
-                        f"{r.get('distanza', 0):.2f}km in {int(r.get('tempo_movimento', 0))} min | "
-                        f"Scarpa: {r.get('scarpe', 'N/D')}"
-                    )
-                testo_attivita = "\n".join(linee_attivita)
-                
-            # 4. Consolidamento finale dell'Omni-Context String
+            # 3. Consolidamento finale dell'Omni-Context String
             context_string = f"""[PARAMETRI BIOMETRICI ATLETA]
 {testo_metriche}
 
 [PIANIFICAZIONE SETTIMANALE ATTUALE]
-{testo_piano}
+{testo_piano}"""
 
-[CRONOLOGIA ULTIME 5 ATTIVITÀ REGISTRATE]
-{testo_attivita}"""
-
-            # 5. Invocazione dell'unico metodo dell'analyst passando la domanda originale e il contesto
+            # 4. Invocazione dell'unico metodo dell'analyst passando la domanda originale e il contesto
             risposta_agente = self.analyst.chat_omni_agent(chat_id, testo, context_string)
             
             self.notifier.send_message(risposta_agente)

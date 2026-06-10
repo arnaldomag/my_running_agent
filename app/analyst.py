@@ -3,6 +3,7 @@ from google import genai
 import google.genai.types as types
 from .config import config
 from .database import db
+from .mcp_bridge import RunalyzeMCPBridge # IMPORTIAMO IL NUOVO PONTE
 import PIL.Image
 import io
 import json
@@ -12,53 +13,38 @@ from .prompts import PROMPT_OMNI_AGENT, PROMPT_OCR_BILANCIA
 class RunningAnalyst:
     def __init__(self):
         api_key = config.get_secret("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY mancante. Controlla le variabili d'ambiente.")
+        runalyze_token = config.get_secret("RUNALYZE_TOKEN") # RECUPERO IL TOKEN DI RUNALYZE
+        
+        if not api_key or not runalyze_token:
+            raise ValueError("Chiavi API mancanti (Gemini o Runalyze).")
 
         self.client = genai.Client(api_key=api_key)
         self.model_id = "gemini-3.5-flash"
+        
+        # INIZIALIZZIAMO IL PONTE MCP
+        self.mcp_bridge = RunalyzeMCPBridge(runalyze_token, self.client, self.model_id)
 
     def chat_omni_agent(self, chat_id, user_text, context_string):
-        """Unico punto di ingresso per l'analisi testuale. Gestisce la chat iniettando tutto il contesto."""
+        """L'interfaccia verso Telegram. Ora non processa più logica, delega tutto all'MCP."""
         try:
-            # 1. Iniettiamo il mega-stringone di contesto generato dall'orchestratore
             full_system_instruction = PROMPT_OMNI_AGENT.format(context_string=context_string)
-
-            # 2. Recuperiamo la cronologia da Firestore (memoria storica dei messaggi)
             contents, history_dicts = db.get_chat_history(chat_id)
 
-            # 3. Appendiamo l'ultimo messaggio dell'utente alla lista dell'SDK
             contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=user_text)]
-                )
+                types.Content(role="user", parts=[types.Part.from_text(text=user_text)])
             )
 
-            # 4. Configurazione dei parametri di generazione
-            gen_config = types.GenerateContentConfig(
-                system_instruction=full_system_instruction,
-                temperature=0.7
-            )
-
-            print(f"🧠 [ANALYST] Chiamata Omni-Agent (Modello: {self.model_id} | Turni History: {len(contents)})")
+            print(f"🧠 [ANALYST] Inizio delegazione Omni-Agent via MCP...")
             
-            # 5. Richiesta all'SDK ufficiale
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=contents,
-                config=gen_config
-            )
-            bot_reply = response.text
+            # DELEGHIAMO LA GESTIONE AL BRIDGE CHE FARÀ LE CHIAMATE A RUNALYZE IN AUTOMATICO
+            bot_reply = self.mcp_bridge.execute_agent_loop(contents, full_system_instruction)
 
-            # 6. Salvataggio della nuova interazione su Firestore per non perdere la memoria al prossimo turno
             db.save_chat_interaction(chat_id, history_dicts, user_text, bot_reply)
-
             return bot_reply
 
         except Exception as e:
-            print(f"❌ [ANALYST] Errore critico nel motore Omni-Agent: {e}")
-            return "Scusami, ho riscontrato un'anomalia temporanea nell'elaborare i dati. Puoi riprovare tra un attimo?"
+            print(f"❌ [ANALYST] Errore critico nel motore MCP: {e}")
+            return "C'è stata un'anomalia di connessione con Runalyze. Dammi un minuto e riproviamo."
 
     def extract_body_metrics_from_image(self, image_bytes):
         """Estrattore OCR tramite Vision Engine."""
