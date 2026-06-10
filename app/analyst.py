@@ -7,6 +7,7 @@ from .mcp_bridge import RunalyzeMCPBridge # IMPORTIAMO IL NUOVO PONTE
 import PIL.Image
 import io
 import json
+import traceback
 
 from .prompts import PROMPT_OMNI_AGENT, PROMPT_OCR_BILANCIA
 
@@ -45,7 +46,7 @@ class RunningAnalyst:
         except Exception as e:
             # MODIFICATO: Questo stamperà l'errore reale nascosto nel TaskGroup nei log di Cloud Run
             print("💥 [CRITICAL] Traceback dettagliato dell'errore MCP:")
-            # traceback.print_exc()
+            traceback.print_exc()
             
             return "C'è stata un'anomalia di connessione con Runalyze. Dammi un minuto e riproviamo."
 
