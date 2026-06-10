@@ -4,9 +4,8 @@ from datetime import date, timedelta, datetime
 from app.config import config
 
 class BotOrchestrator:
-    def __init__(self, db, runalyze_client, analyst, notifier):
+    def __init__(self, db, analyst, notifier):
         self.db = db
-        self.runalyze_client = runalyze_client
         self.analyst = analyst
         self.notifier = notifier
 
