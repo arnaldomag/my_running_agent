@@ -1,5 +1,6 @@
 # app/analyst.py
 from google import genai
+import traceback
 import google.genai.types as types
 from .config import config
 from .database import db
