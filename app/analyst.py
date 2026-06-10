@@ -43,7 +43,10 @@ class RunningAnalyst:
             return bot_reply
 
         except Exception as e:
-            print(f"❌ [ANALYST] Errore critico nel motore MCP: {e}")
+            # MODIFICATO: Questo stamperà l'errore reale nascosto nel TaskGroup nei log di Cloud Run
+            print("💥 [CRITICAL] Traceback dettagliato dell'errore MCP:")
+            traceback.print_exc()
+            
             return "C'è stata un'anomalia di connessione con Runalyze. Dammi un minuto e riproviamo."
 
     def extract_body_metrics_from_image(self, image_bytes):
