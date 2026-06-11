@@ -86,8 +86,23 @@ class BotOrchestrator:
             # 4. Invocazione dell'unico metodo dell'analyst passando la domanda originale e il contesto
             risposta_agente = self.analyst.chat_omni_agent(chat_id, testo, context_string)
             
-            self.notifier.send_message(risposta_agente)
-            
+            if risposta_agente:
+                # Stampiamo nei log la risposta grezza per fare debug visivo su Cloud Run
+                print(f"🤖 [ORCHESTRATOR] Risposta grezza generata da Gemini:\n{risposta_agente}")
+                
+                # Rimuoviamo eventuali recinti di codice markdown che Gemini Flash tende a inserire
+                risposta_pulita = risposta_agente.strip()
+                if risposta_pulita.startswith("```"):
+                    # Rimuove sia ```html che semplicemente ```
+                    lines = risposta_pulita.splitlines()
+                    if len(lines) > 2 and lines[0].startswith("```"):
+                        risposta_pulita = "\n".join(lines[1:-1])
+                
+                # Invio del testo pulito
+                self.notifier.send_message(risposta_pulita)
+            else:
+                print("⚠️ [ORCHESTRATOR] Gemini ha restituito una risposta vuota.")
+                
         except Exception as e:
             print(f"💥 [ORCHESTRATOR] Errore nella compilazione del contesto della chat: {e}")
             self.notifier.send_message("❌ Si è verificato un errore durante l'allineamento dei dati di contesto.")
