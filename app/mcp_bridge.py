@@ -84,23 +84,21 @@ class RunalyzeMCPBridge:
                 tools=gemini_tools
             )
 
-            print("🧠 [MCP-HTTP] Invio contesto a Gemini...")
+            print("🧠 [MCP-HTTP] Invio contesto iniziale a Gemini...")
             response = self.gemini_client.models.generate_content(
                 model=self.model_id,
                 contents=contents,
                 config=gen_config
             )
 
-            # 4. Se Gemini decide di chiamare uno o più strumenti di Runalyze
-            if response.function_calls:
-                
-                # FIX DEFINITIVO: Appendiamo l'intero oggetto di risposta originale di Google.
-                # Questo preserva intatta la 'thought_signature' e tutti i metadati nativi.
+            # 4. AGGIORNATO: Trasformiamo l'IF in un WHILE per gestire chiamate a catena (Multi-Turn)
+            while response.function_calls:
+                # Conserviamo la richiesta del modello con la sua thought_signature intatta
                 contents.append(response.candidates[0].content)
                 
-                # Eseguiamo i tool richiesti in sequenza
+                # Eseguiamo tutti i tool richiesti in questo specifico turno
                 for call in response.function_calls:
-                    print(f"⚙️ [MCP-HTTP] Gemini esegue autonomamente: {call.name}")
+                    print(f"⚙️ [MCP-HTTP] Gemini richiede lo strumento: {call.name}")
                     
                     call_payload = {
                         "jsonrpc": "2.0",
@@ -114,12 +112,11 @@ class RunalyzeMCPBridge:
                     call_resp = client.post(self.url, json=call_payload)
                     call_resp.raise_for_status()
                     
-                    # Compattiamo i dati testuali restituiti dal tool
                     tool_result = call_resp.json().get("result", {})
                     content_list = tool_result.get("content", [])
                     tool_result_text = "\n".join([c.get("text", "") for c in content_list if c.get("type") == "text"])
                     
-                    # Registriamo la risposta del tool (questo blocco va bene così com'è)
+                    # Appendiamo il risultato del tool alla cronologia
                     contents.append(
                         types.Content(
                             role="tool",
@@ -134,13 +131,18 @@ class RunalyzeMCPBridge:
                         )
                     )
                 
-                print("🧠 [MCP-HTTP] Generazione della risposta finale con i dati di Runalyze...")
-                final_response = self.gemini_client.models.generate_content(
+                # Sparamo di nuovo la storia aggiornata a Gemini. 
+                # Se ha bisogno di altri dati (es. i dettagli della corsa), il ciclo WHILE ricomincia.
+                print("🧠 [MCP-HTTP] Invio dati estratti a Gemini per il prossimo step di ragionamento...")
+                response = self.gemini_client.models.generate_content(
                     model=self.model_id,
                     contents=contents,
                     config=gen_config
                 )
-                return final_response.text
+            
+            # Quando esce dal ciclo while, significa che Gemini ha tutti i dati e ha generato il testo finale
+            print("🎯 [MCP-HTTP] Elaborazione completata con successo. Risposta testuale pronta.")
+            return response.text
             
             # Se l'utente ha fatto una domanda generica che non richiede dati atletici
             return response.text
