@@ -7,3 +7,8 @@ __pycache__/
 # Secret e Configurazioni  #
 # ======================== #
 .env
+
+# ======================== #
+# Test locali              #
+# ======================== #
+scripts/test_locali/
