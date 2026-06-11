@@ -10,7 +10,7 @@ class RunalyzeMCPBridge:
         # Runalyze di solito accetta il token direttamente nell'header 'token' 
         # (In alternativa, potresti dover usare: {"token": token})
         clean_token = token.strip() if token else ""
-        self.headers = {"Authorization": f"Bearer {clean_token}"} 
+        self.headers = {"Authorization": f"Bearer pt#{clean_token}"} 
         self.gemini_client = gemini_client
         self.model_id = model_id
 
