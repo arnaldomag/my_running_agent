@@ -26,28 +26,60 @@ class RunningAnalyst:
         self.mcp_bridge = RunalyzeMCPBridge(runalyze_token, self.client, self.model_id)
 
     def chat_omni_agent(self, chat_id, user_text, context_string):
-        """L'interfaccia verso Telegram. Ora non processa più logica, delega tutto all'MCP."""
+        """Punto di ingresso per la chat: normalizza la cronologia per il nuovo SDK."""
         try:
             full_system_instruction = PROMPT_OMNI_AGENT.format(context_string=context_string)
-            contents, history_dicts = db.get_chat_history(chat_id)
+            
+            # 1. Recuperiamo i dizionari grezzi da Firestore
+            _, history_dicts = db.get_chat_history(chat_id)
+            
+            # 2. ADATTATORE: Convertiamo i dati storici di Firestore in oggetti tipizzati strict
+            contents = []
+            if history_dicts:
+                for turn in history_dicts:
+                    role = turn.get("role")
+                    parts_raw = turn.get("parts", [])
+                    
+                    processed_parts = []
+                    for p in parts_raw:
+                        if p is None:
+                            continue
+                        
+                        # Se nel DB è salvato come stringa nativa (il tuo caso attuale)
+                        if isinstance(p, str):
+                            processed_parts.append(types.Part(text=p))
+                        # Se è già un dizionario strutturato (es. chiamate precedenti)
+                        elif isinstance(p, dict):
+                            if "text" in p:
+                                processed_parts.append(types.Part(text=p["text"]))
+                            elif "function_call" in p:
+                                fc = p["function_call"]
+                                processed_parts.append(types.Part(
+                                    function_call=types.FunctionCall(name=fc.get("name"), args=fc.get("args"))
+                                ))
+                            elif "function_response" in p:
+                                fr = p["function_response"]
+                                processed_parts.append(types.Part(
+                                    function_response=types.FunctionResponse(name=fr.get("name"), response=fr.get("response"))
+                                ))
+                    
+                    if processed_parts and role:
+                        contents.append(types.Content(role=role, parts=processed_parts))
 
+            # 3. Aggiungiamo l'ultimo messaggio dell'utente corrente (usando l'oggetto corretto)
             contents.append(
-                types.Content(role="user", parts=[types.Part.from_text(text=user_text)])
+                types.Content(role="user", parts=[types.Part(text=user_text)])
             )
 
             print(f"🧠 [ANALYST] Inizio delegazione Omni-Agent via MCP...")
-            
-            # DELEGHIAMO LA GESTIONE AL BRIDGE CHE FARÀ LE CHIAMATE A RUNALYZE IN AUTOMATICO
             bot_reply = self.mcp_bridge.execute_agent_loop(contents, full_system_instruction)
 
             db.save_chat_interaction(chat_id, history_dicts, user_text, bot_reply)
             return bot_reply
 
         except Exception as e:
-            # MODIFICATO: Questo stamperà l'errore reale nascosto nel TaskGroup nei log di Cloud Run
             print("💥 [CRITICAL] Traceback dettagliato dell'errore MCP:")
-            traceback.print_exc()
-            
+            traceback.print_exc() 
             return "C'è stata un'anomalia di connessione con Runalyze. Dammi un minuto e riproviamo."
 
     def extract_body_metrics_from_image(self, image_bytes):

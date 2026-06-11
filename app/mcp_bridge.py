@@ -93,12 +93,15 @@ class RunalyzeMCPBridge:
 
             # 4. Se Gemini decide di chiamare uno o più strumenti di Runalyze
             if response.function_calls:
+                
+                # FIX DEFINITIVO: Appendiamo l'intero oggetto di risposta originale di Google.
+                # Questo preserva intatta la 'thought_signature' e tutti i metadati nativi.
                 contents.append(response.candidates[0].content)
                 
+                # Eseguiamo i tool richiesti in sequenza
                 for call in response.function_calls:
                     print(f"⚙️ [MCP-HTTP] Gemini esegue autonomamente: {call.name}")
                     
-                    # Chiamata RPC esplicita in POST per eseguire il tool richiesto
                     call_payload = {
                         "jsonrpc": "2.0",
                         "id": 3,
@@ -116,14 +119,18 @@ class RunalyzeMCPBridge:
                     content_list = tool_result.get("content", [])
                     tool_result_text = "\n".join([c.get("text", "") for c in content_list if c.get("type") == "text"])
                     
-                    # Rispediamo i dati grezzi a Gemini come storico del tool
+                    # Registriamo la risposta del tool (questo blocco va bene così com'è)
                     contents.append(
                         types.Content(
                             role="tool",
-                            parts=[types.Part.from_function_response(
-                                name=call.name,
-                                response={"result": tool_result_text}
-                            )]
+                            parts=[
+                                types.Part(
+                                    function_response=types.FunctionResponse(
+                                        name=call.name,
+                                        response={"result": tool_result_text}
+                                    )
+                                )
+                            ]
                         )
                     )
                 
