@@ -413,67 +413,6 @@ class BotOrchestrator:
             print(f"❌ [ORCHESTRATOR] Errore in process_cron_weekly_report: {e}")
             self.notifier.send_message("❌ Si è verificato un errore tecnico nella generazione del report automatico.")
 
-    # ==========================================
-    # 6. GESTIONE DASHBOARD
-    # ==========================================
-    def get_dashboard_metrics(self):
-        """
-        Estrae le ultime attività da Firestore, calcola le metriche aggregate
-        e prepara il time-series payload per il frontend della Mini App.
-        """
-        try:
-            recent_runs = self.db.get_recent_runs(limit=15)
-            
-            if not recent_runs:
-                return {
-                    "status": "success",
-                    "data": {"labels": [], "kilometers": [], "paces": [], "latest_weight": 0}
-                }
-            
-            recent_runs.reverse()
-            
-            labels = []
-            kilometers = []
-            paces = []
-            
-            for run in recent_runs:
-                start_date = run.get('start_date', '')
-                if len(start_date) >= 10:
-                    label_data = start_date[5:10] # Estrae "MM-DD"
-                else:
-                    label_data = "Corsa"
-                labels.append(label_data)
-                
-                # Il campo 'distanza' è già in km
-                km = run.get('distanza', 0)
-                kilometers.append(round(km, 2))
-                
-                # Il tempo movimento è in minuti
-                tempo_min = run.get('tempo_movimento', 0)
-                
-                # Passo medio in minuti decimali per km (es: 5'30" -> 5.5)
-                if km > 0:
-                    passo_totale_minuti = tempo_min / km
-                    paces.append(round(passo_totale_minuti, 2))
-                else:
-                    paces.append(0)
-            
-            latest_weight = self.db.get_latest_weight()
-            
-            return {
-                "status": "success",
-                "data": {
-                    "labels": labels,
-                    "kilometers": kilometers,
-                    "paces": paces,
-                    "latest_weight": latest_weight or 0
-                }
-            }
-            
-        except Exception as e:
-            print(f"❌ [ORCHESTRATOR] Errore critico nel calcolo delle metriche dashboard: {e}")
-            return {"status": "error", "message": f"Errore elaborazione dati: {str(e)}"}
-
     def process_fallback_weekly_report(self):
         try:
             print("📅 [ORCHESTRATOR] Avvio recupero settimana di fallback...")
@@ -507,28 +446,6 @@ class BotOrchestrator:
         except Exception as e:
             print(f"❌ [ORCHESTRATOR] Errore in process_fallback_weekly_report: {e}")
             self.notifier.send_message(f"❌ Errore durante il recupero del report di fallback: {e}")
-
-    def handle_dashboard_view(self, chat_id):
-        """Genera e invia il bottone inline per aprire la Telegram Mini App"""
-        app_url = config.webapp_url
-        if not app_url:
-            self.notifier.send_message(chat_id, "⚠️ URL della Web App non configurato.")
-            return True
-            
-        markup = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "📊 Apri le tue Metriche",
-                        "web_app": {"url": app_url}
-                    }
-                ]
-            ]
-        }
-        
-        messaggio = "Ecco la tua dashboard interattiva con i trend di allenamento e i dati del peso corporeo."
-        self.notifier.send_message(messaggio, reply_markup=markup)
-        return True
 
     def handle_fallback_ignore(self):
         self.notifier.send_message("👌 Ricevuto. Goditi il riposo, ci sentiamo alla prossima corsa!")

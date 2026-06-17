@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 # Importiamo moduli e servizi
 from app.analyst import analyst
 from app.telegram_client import notifier
@@ -105,8 +105,6 @@ def telegram_webhook():
             if testo.startswith('/'):
                 if testo_lower in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
                     orchestrator.process_shoe_list()
-                elif testo_lower == '/dashboard':
-                    orchestrator.handle_dashboard_view(chat_id)
                 elif testo_lower.startswith('/syncstorico'):
                     orchestrator.handle_sync_storico(testo)
                 elif testo_lower == '/sync':
@@ -194,45 +192,6 @@ def tasks_weekly_report():
     except Exception as e:
         print(f"❌ [CRON] Errore durante l'esecuzione del cron job: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
-# ==================================================
-# NEW: ROTTA PER SERVIRE LA TELEGRAM MINI APP
-# ==================================================
-@app.route('/dashboard', methods=['GET'])
-def dashboard_view():
-    try:
-        print("🌐 [WEBHOOK] Richiesta di apertura della Mini App ricevuta.")
-        return render_template('dashboard.html')
-    except Exception as e:
-        print(f"💥 [WEBHOOK] Errore nel caricamento del template della dashboard: {e}")
-        return "Errore interno nel caricamento della dashboard.", 500
-
-# ==================================================
-# API JSON PER I DATI DELLA DASHBOARD
-# ==================================================
-@app.route('/api/metrics', methods=['GET'])
-def api_metrics():
-    try:
-        tg_init_data = request.headers.get('X-Telegram-Init-Data')
-        
-        # Logica di Bypass Esclusiva per l'ambiente di Test Locale (localhost)
-        is_local = request.host.startswith('localhost') or request.host.startswith('127.0.0.1')
-        
-        if is_local and not tg_init_data:
-            print("⚠️ [SECURITY] Accesso Locale (BYPASS ATTIVO)")
-        else:
-            # Controllo di Sicurezza per la Produzione
-            if not verify_telegram_data(tg_init_data):
-                print("🔒 [SECURITY] Accesso API Bloccato: Firma Telegram non valida.")
-                return jsonify({"status": "error", "message": "Unauthorized"}), 401
-                
-        # Se passiamo il blocco, recuperiamo i dati veri
-        dati_json = orchestrator.get_dashboard_metrics()
-        return jsonify(dati_json), 200
-        
-    except Exception as e:
-        print(f"💥 [WEBHOOK] Errore nella rotta API protetta: {e}")
-        return jsonify({"status": "error", "message": "Internal Error"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
