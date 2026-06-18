@@ -1,4 +1,5 @@
 # app/runalyze_client.py
+from datetime import datetime
 import requests
 from app.config import config
 
@@ -69,6 +70,49 @@ class RunalyzeClient:
         except Exception as e:
             print(f"❌ [API] Errore recupero dettaglio equipaggiamento {gear_id}: {e}")
             return None
+
+    def upload_body_metrics(self, dati_corporei):
+        """Carica le metriche corporee su Runalyze tramite chiamata POST"""
+        print("🏋️ [API] Invio composizione corporea a Runalyze...")
+        try:
+            url = f"{self.base_url}/metrics/bodyComposition"
+            
+            # Timestamp in formato standard ISO 8601 compatibile con l'API
+            now_iso = datetime.now().isoformat()
+            
+            # Helper interno per garantire che i valori passati siano float validi per il JSON
+            def _safe_float(key):
+                val = dati_corporei.get(key, 0)
+                if not val: 
+                    return 0.0
+                try:
+                    return float(str(val).replace(',', '.'))
+                except ValueError:
+                    return 0.0
+
+            payload = {
+                "date_time": now_iso,
+                "weight": _safe_float('peso_kg'),
+                "fat_percentage": _safe_float('massa_grassa_percentuale'),
+                "water_percentage": _safe_float('massa_idrica_percentuale'),
+                "muscle_percentage": _safe_float('massa_muscolare_percentuale'),
+                "bone_percentage": _safe_float('massa_ossea_percentuale')
+            }
+            
+            res = requests.post(url, headers=self.headers, json=payload)
+            res.raise_for_status()
+            
+            print("✅ [API] Dati corporei caricati con successo su Runalyze.")
+            return True
+            
+        except requests.exceptions.HTTPError as errh:
+            print(f"❌ [API] Errore HTTP Runalyze: {errh}")
+            if hasattr(errh, 'response') and errh.response is not None:
+                print(f"Dettaglio: {errh.response.text}")
+            return False
+        except Exception as e:
+            print(f"❌ [API] Errore di sistema nel caricamento metriche: {e}")
+            return False
 
 # Istanza pronta all'uso
 runalyze_client = RunalyzeClient()
