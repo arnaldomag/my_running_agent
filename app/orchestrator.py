@@ -174,6 +174,10 @@ class BotOrchestrator:
         if image_bytes:
             dati_corporei = self.analyst.extract_body_metrics_from_image(image_bytes)
             if dati_corporei and self.db.save_body_metrics(dati_corporei):
+
+                runalyze_ok = self.runalyze_client.upload_body_metrics(dati_corporei)
+                badge_runalyze = "✅ <b>Runalyze:</b> Sincronizzato" if runalyze_ok else "⚠️ <b>Runalyze:</b> Errore di sincronizzazione"
+
                 msg = (
                     f"⚖️ <b>Metriche salvate su Firestore!</b>\n\n"
                     f"📅 Data misurazione: {dati_corporei.get('data', 'N/D')}\n"
@@ -183,7 +187,8 @@ class BotOrchestrator:
                     f"🔴 Massa Muscolare: {dati_corporei.get('massa_muscolare_percentuale', 'N/D')}%\n"
                     f"🦴 Massa Ossea: {dati_corporei.get('massa_ossea_percentuale', 'N/D')}%\n"
                     f"💧 Massa Idrica: {dati_corporei.get('massa_idrica_percentuale', 'N/D')}%\n\n"
-                    f"🍀 <i>Il database biometrico è aggiornato ed è a disposizione di Gemini MCP.</i>"
+                    f"☁️ <b>Firestore:</b> Aggiornato per l'Agent MCP\n"
+                    f"{badge_runalyze}"
                 )
                 self.notifier.send_message(msg)
             else:
