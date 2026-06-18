@@ -176,8 +176,13 @@ class BotOrchestrator:
             if dati_corporei and self.db.save_body_metrics(dati_corporei):
                 msg = (
                     f"⚖️ <b>Metriche salvate su Firestore!</b>\n\n"
+                    f"📅 Data misurazione: {dati_corporei.get('data', 'N/D')}\n"
                     f"⚖️ Peso: <b>{dati_corporei.get('peso_kg', 'N/D')} kg</b>\n"
+                    f"📊 IMC: {dati_corporei.get('imc', 'N/D')}\n"
                     f"🟡 Massa Grassa: {dati_corporei.get('massa_grassa_percentuale', 'N/D')}%\n"
+                    f"🔴 Massa Muscolare: {dati_corporei.get('massa_muscolare_percentuale', 'N/D')}%\n"
+                    f"🦴 Massa Ossea: {dati_corporei.get('massa_ossea_percentuale', 'N/D')}%\n"
+                    f"💧 Massa Idrica: {dati_corporei.get('massa_idrica_percentuale', 'N/D')}%\n\n"
                     f"🍀 <i>Il database biometrico è aggiornato ed è a disposizione di Gemini MCP.</i>"
                 )
                 self.notifier.send_message(msg)
