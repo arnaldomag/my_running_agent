@@ -68,12 +68,41 @@ class BotOrchestrator:
             if risposta_agente:
                 print("🤖 [ORCHESTRATOR] Risposta generata con successo ed inviata a Telegram.")
                 risposta_pulita = risposta_agente.strip()
+                
+                # Pulizia blocchi markdown
                 if risposta_pulita.startswith("```"):
                     lines = risposta_pulita.splitlines()
                     if len(lines) > 2 and lines[0].startswith("```"):
                         risposta_pulita = "\n".join(lines[1:-1])
+
+                # --- ESTRAZIONE ID E CREAZIONE BOTTONI LINK ---
+                import re
+                tastiera_inline = None
                 
-                self.notifier.send_message(risposta_pulita)
+                # Cerca il pattern esatto richiesto nel prompt
+                match = re.search(r'\[RUNALYZE_IDS:\s*([\d,\s]+)\]', risposta_pulita)
+                
+                if match:
+                    ids_str = match.group(1)
+                    # Separa per virgola e pulisce gli spazi, assicurandosi che siano numeri
+                    activity_ids = [aid.strip() for aid in ids_str.split(',') if aid.strip().isdigit()]
+
+                    if activity_ids:
+                        bottoni = []
+                        # Crea un bottone per ogni ID trovato (uno sotto l'altro)
+                        for aid in activity_ids:
+                            bottoni.append([{
+                                "text": f"🔗 Apri in Runalyze ({aid})",
+                                "url": f"https://runalyze.com/activity/{aid}"
+                            }])
+                        tastiera_inline = {"inline_keyboard": bottoni}
+
+                    # Rimuove il "tag nascosto" dal testo finale per non sporcare la chat
+                    risposta_pulita = re.sub(r'\[RUNALYZE_IDS:\s*[\d,\s]+\]', '', risposta_pulita).strip()
+                # ----------------------------------------------
+                
+                # Passa la tastiera (se esiste) al metodo send_message
+                self.notifier.send_message(risposta_pulita, reply_markup=tastiera_inline)
             else:
                 self.notifier.send_message("⚠️ Si è verificato un timeout nella generazione della risposta.")
                 
