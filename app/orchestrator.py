@@ -66,7 +66,7 @@ class BotOrchestrator:
             risposta_agente = self.analyst.chat_omni_agent(chat_id, testo, context_string)
             
             if risposta_agente:
-                print(f"🤖 [ORCHESTRATOR] Risposta grezza generata da Gemini:\n{risposta_agente}")
+                print("🤖 [ORCHESTRATOR] Risposta generata con successo ed inviata a Telegram.")
                 risposta_pulita = risposta_agente.strip()
                 if risposta_pulita.startswith("```"):
                     lines = risposta_pulita.splitlines()
