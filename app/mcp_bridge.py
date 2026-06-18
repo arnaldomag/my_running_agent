@@ -9,9 +9,12 @@ class RunalyzeMCPBridge:
         self.gemini_client = gemini_client
         self.model_id = model_id
         
+        mcp_token = self.token if self.token.startswith("pt#") else f"pt#{self.token}"
+        print(f"🔐 [MCP-Bridge] Token Runalyze configurato: {mcp_token[:5]}***")
+        
         # Header base stabili per l'autenticazione
         self.base_headers = {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {mcp_token}",
             "Content-Type": "application/json"
         }
 

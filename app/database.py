@@ -6,7 +6,6 @@ from google import genai
 class RunningDB:
     def __init__(self):
         self.db = firestore.Client(project=config.project_id, database="my-running-agent")
-        # Puntamento aggiornato alla nuova tabella Runalyze
         self.collection_name = "attivita"
 
     # ==========================================
@@ -67,21 +66,21 @@ class RunningDB:
         return True
 
     # ==========================================
-    # 2. GESTIONE ATTIVITÀ RUNALYZE (ETL)
+    # 2. GESTIONE ATTIVITÀ (ETL)
     # ==========================================
     def update_activity(self, activity_data):
         activity_id = str(activity_data.get('id'))
         if not activity_id:
             print("❌ Impossibile salvare: ID attività mancante.")
-            return
-        
+            return False
+ 
         doc_ref = self.db.collection(self.collection_name).document(activity_id)
         doc_ref.set(activity_data, merge=True)
-        print(f"✅ Attività {activity_id} sincronizzata su Firestore.")
+        return True
 
     def get_recent_runs(self, limit=10):
         docs = self.db.collection(self.collection_name)\
-                      .order_by("start_date", direction=firestore.Query.DESCENDING)\
+                      .order_by("start_date", direction=self.db.Query.DESCENDING)\
                       .limit(limit).stream()
         return [doc.to_dict() for doc in docs]
 
