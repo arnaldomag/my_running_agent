@@ -10,11 +10,12 @@ from urllib.parse import parse_qsl
 import hmac
 from collections import deque
 import threading
+from app.runalyze_client import runalyze_client
 
 app = Flask(__name__)
 
 # Inizializziamo l'orchestratore
-orchestrator = BotOrchestrator(db, analyst, notifier)
+orchestrator = BotOrchestrator(db, analyst, notifier, runalyze_client)
 
 # --- MEMORIA ANTI-DOPPIONI ---
 processed_updates = deque(maxlen=100)
@@ -104,20 +105,19 @@ def telegram_webhook():
             # A) Comandi strutturati
             if testo.startswith('/'):
                 if testo_lower in ['/elenco scarpe', '/elencoscarpe', '/scarpe']:
-                    orchestrator.process_shoe_list()
+                    threading.Thread(target=orchestrator.process_shoe_list, args=(chat_id,)).start()
                 elif testo_lower.startswith('/syncstorico'):
-                    orchestrator.handle_sync_storico(testo)
+                    threading.Thread(target=orchestrator.handle_sync_storico, args=(testo,)).start()
                 elif testo_lower == '/sync':
-                    # ECCO IL NUOVO COMANDO!
                     threading.Thread(target=orchestrator.handle_sync_incrementale).start()
                 elif testo_lower.startswith('/pianifica'):
-                    orchestrator.handle_plan_creation(testo)
+                    threading.Thread(target=orchestrator.handle_plan_creation, args=(testo,)).start()
                 elif testo_lower == '/piano':
-                    orchestrator.handle_plan_view()
+                    threading.Thread(target=orchestrator.handle_plan_view).start()
                 elif testo_lower.startswith('/modifica'):
-                    orchestrator.handle_plan_modification(testo)
+                    threading.Thread(target=orchestrator.handle_plan_modification, args=(testo,)).start()
                 else:
-                    orchestrator.handle_unrecognized_command()
+                    threading.Thread(target=orchestrator.handle_unrecognized_command).start()
                 return jsonify({"status": "ok"}), 200
 
             # B) Chat libera con l'Intelligenza Artificiale (MessageHandler)
@@ -161,7 +161,9 @@ def telegram_webhook():
                 
             elif callback_data.startswith('shoe_'):
                 gear_id = callback_data.replace('shoe_', '')
-                orchestrator.process_shoe_analysis(gear_id)
+                # Estraiamo il chat_id dalla query del bottone
+                chat_id_btn = query['message']['chat']['id']
+                threading.Thread(target=orchestrator.process_shoe_analysis, args=(chat_id_btn, gear_id)).start()
 
             elif callback_data.startswith('man_done_'):
                 session_id = callback_data.replace('man_done_', '')
@@ -187,8 +189,9 @@ def telegram_webhook():
 def tasks_weekly_report():
     try:
         print("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler!")
-        orchestrator.process_cron_weekly_report()
-        return jsonify({"status": "ok", "message": "Report settimanale avviato con successo."}), 200
+        mio_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+        threading.Thread(target=orchestrator.process_cron_weekly_report, args=(mio_chat_id,)).start()
+        return jsonify({"status": "ok"}), 200
     except Exception as e:
         print(f"❌ [CRON] Errore durante l'esecuzione del cron job: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
