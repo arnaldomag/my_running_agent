@@ -75,32 +75,43 @@ class BotOrchestrator:
                     if len(lines) > 2 and lines[0].startswith("```"):
                         risposta_pulita = "\n".join(lines[1:-1])
 
-                # --- ESTRAZIONE ID E CREAZIONE BOTTONI LINK ---
-                import re
+                # --- ESTRAZIONE ID E NOMI PER CREAZIONE BOTTONI LINK ---
+                # import re
                 tastiera_inline = None
                 
-                # Cerca il pattern esatto richiesto nel prompt
-                match = re.search(r'\[RUNALYZE_IDS:\s*([\d,\s]+)\]', risposta_pulita)
+                # Cerca il nuovo pattern con ID e Nomi
+                match = re.search(r'\[RUNALYZE_LINKS:\s*(.*?)\]', risposta_pulita)
                 
                 if match:
-                    ids_str = match.group(1)
-                    # Separa per virgola e pulisce gli spazi, assicurandosi che siano numeri
-                    activity_ids = [aid.strip() for aid in ids_str.split(',') if aid.strip().isdigit()]
+                    links_str = match.group(1)
+                    # Separa per virgola per isolare le diverse attività
+                    link_items = [item.strip() for item in links_str.split(',')]
 
-                    if activity_ids:
+                    if link_items:
                         bottoni = []
-                        # Crea un bottone per ogni ID trovato (uno sotto l'altro)
-                        for aid in activity_ids:
-                            bottoni.append([{
-                                "text": f"🔗 Apri in Runalyze ({aid})",
-                                "url": f"https://runalyze.com/activity/{aid}"
-                            }])
-                        tastiera_inline = {"inline_keyboard": bottoni}
+                        for item in link_items:
+                            # Divide la singola attività usando il pipe come separatore
+                            parts = item.split('|', 1) 
+                            if len(parts) == 2:
+                                aid = parts[0].strip()
+                                aname = parts[1].strip()
+                                
+                                # Verifica che l'ID sia un numero valido
+                                if aid.isdigit():
+                                    # Troncamento di sicurezza se il nome è troppo lungo per il bottone Telegram
+                                    nome_bottone = aname[:35] + "..." if len(aname) > 35 else aname
+                                    bottoni.append([{
+                                        "text": f"🔗 {nome_bottone}",
+                                        "url": f"https://runalyze.com/activity/{aid}"
+                                    }])
+                                    
+                        if bottoni:
+                            tastiera_inline = {"inline_keyboard": bottoni}
 
                     # Rimuove il "tag nascosto" dal testo finale per non sporcare la chat
-                    risposta_pulita = re.sub(r'\[RUNALYZE_IDS:\s*[\d,\s]+\]', '', risposta_pulita).strip()
+                    risposta_pulita = re.sub(r'\[RUNALYZE_LINKS:\s*.*?\]', '', risposta_pulita).strip()
                 # ----------------------------------------------
-                
+
                 # Passa la tastiera (se esiste) al metodo send_message
                 self.notifier.send_message(risposta_pulita, reply_markup=tastiera_inline)
             else:
