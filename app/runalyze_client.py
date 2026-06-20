@@ -10,7 +10,7 @@ class RunalyzeClient:
         self.base_url = "https://runalyze.com/api/v1"
         self.headers = {"token": self.token}
 
-     def sync_new_activities(self, db):
+    def sync_new_activities(self, db):
         """Scarica le ultime attività e salva SOLO quelle nuove"""
         print("🔄 [ETL] Avvio sincronizzazione incrementale da Runalyze...")
         try:
