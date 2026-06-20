@@ -10,10 +10,12 @@ class RunalyzeClient:
         self.base_url = "https://runalyze.com/api/v1"
         self.headers = {"token": self.token}
 
-    def sync_new_activities(self, db):
-        """Scarica le ultime 20 attività e le salva/aggiorna su Firestore"""
-        print("🔄 [ETL] Avvio sincronizzazione da Runalyze a Firestore...")
+     def sync_new_activities(self, db):
+        """Scarica le ultime attività e salva SOLO quelle nuove"""
+        print("🔄 [ETL] Avvio sincronizzazione incrementale da Runalyze...")
         try:
+            # Puoi regolare il limite se vuoi, 20 o 100 non cambia nulla ora
+            # perché il ciclo si fermerà automaticamente appena trova dati già noti.
             url = f"{self.base_url}/activity?limit=20"
             res = requests.get(url, headers=self.headers)
             res.raise_for_status()
@@ -22,6 +24,19 @@ class RunalyzeClient:
             synced_count = 0
             
             for act in activities:
+                activity_id = str(act.get("id"))
+                
+                # --- NOVITÀ: CONTROLLO INCREMENTALE ---
+                doc_ref = db.db.collection(db.collection_name).document(activity_id)
+                if doc_ref.get().exists:
+                    # Trovata un'attività già presente! 
+                    # Siccome le API restituiscono le corse in ordine decrescente,
+                    # se questa esiste già, significa che tutte le successive sono storiche.
+                    # Blocchiamo il ciclo per risparmiare tempo e operazioni.
+                    print(f"ℹ️ Attività {activity_id} già presente, interrompo il sync.")
+                    break 
+                # --------------------------------------
+
                 # Estraiamo l'equipaggiamento per salvare le scarpe usate
                 scarpe_usate = "Non specificate"
                 equip_list = act.get('equipment', [])
@@ -30,7 +45,7 @@ class RunalyzeClient:
 
                 # Mappatura dei dati per Firestore
                 dati_corsa = {
-                    "id": str(act.get("id")),
+                    "id": activity_id,
                     "nome": act.get("name", "Corsa"),
                     "start_date": act.get("date_time", ""),
                     "distanza": act.get("distance", 0),
