@@ -119,6 +119,14 @@ class RunalyzeMCPBridge:
                     content_list = tool_result.get("content", [])
                     tool_result_text = "\n".join([c.get("text", "") for c in content_list if c.get("type") == "text"])
                     
+                    # --- NOVITÀ: DIETA DEI TOKEN PER IL FREE TIER ---
+                    # Limitiamo la risposta grezza a un massimo di 15.000 caratteri (circa 3000 token)
+                    MAX_CHARS = 15000
+                    if len(tool_result_text) > MAX_CHARS:
+                        print(f"⚠️ [MCP-HTTP] Payload troppo lungo ({len(tool_result_text)} chars). Troncamento in corso...")
+                        tool_result_text = tool_result_text[:MAX_CHARS] + "\n...[DATI TRONCATI PER LIMITE TOKEN. ANALIZZA SOLO I DATI RICEVUTI FINO A QUI]..."
+                    # ------------------------------------------------
+                    
                     # Appendiamo il risultato del tool alla cronologia
                     contents.append(
                         types.Content(
