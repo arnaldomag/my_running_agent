@@ -20,7 +20,7 @@ class RunningAnalyst:
             raise ValueError("Chiavi API mancanti (Gemini o Runalyze).")
 
         self.client = genai.Client(api_key=api_key)
-        self.model_id = "gemini-1.5-flash"
+        self.model_id = "gemini-3.5-flash"
         
         # INIZIALIZZIAMO IL PONTE MCP
         self.mcp_bridge = RunalyzeMCPBridge(runalyze_token, self.client, self.model_id)
