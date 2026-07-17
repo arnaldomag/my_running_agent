@@ -1,61 +1,85 @@
-# 🏃‍♂️ My Running Agent
+# MyRunningAgent 🏃‍♂️🤖
 
-[cite_start]Un assistente virtuale per il running basato su Telegram, progettato per automatizzare la sincronizzazione con **Runalyze**, gestire la pianificazione degli allenamenti e fornire analisi tecniche avanzate tramite l'Intelligenza Artificiale di **Google Gemini**[cite: 10, 11]. [cite_start]Il sistema è cloud-native e interamente deployato su **Google Cloud Platform** (Cloud Run & Firestore)[cite: 11].
+![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)
+![Google Cloud](https://img.shields.io/badge/GCP-Cloud_Run-4285F4.svg)
+![Gemini AI](https://img.shields.io/badge/AI-Gemini_3.5_Flash-orange.svg)
+![Telegram](https://img.shields.io/badge/Bot-Telegram-2CA5E0.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
----
+MyRunningAgent is an advanced, autonomous virtual running assistant integrated into Telegram. Acting as both a data analyst and a sports coach, it leverages Generative AI and the Model Context Protocol (MCP) to analyze training telemetry, track body metrics, and manage weekly workout plans.
 
-## 🌟 Funzionalità Principali
+## 🧠 Architecture: The "Omni-Agent Context"
 
-* **📊 Dashboard Interattiva (Telegram Mini App):**
-    * [cite_start]Visualizzazione dei trend di allenamento (passo e chilometraggio) e monitoraggio del peso corporeo tramite un'interfaccia grafica integrata direttamente in Telegram[cite: 161, 374, 386, 392].
-    * [cite_start]Validazione crittografica sicura (HMAC-SHA256) per garantire che solo le richieste provenienti dalla tua chat Telegram possano accedere ai dati[cite: 406, 407].
-* **📅 Pianificazione Settimanale Integrata (Mini-CRUD):**
-    * [cite_start]Crea, visualizza, modifica e completa gli allenamenti direttamente da Telegram tramite messaggi testuali e bottoni inline (`✅ Chiudi`, `↩️ Riapri`, `❌ Elimina`)[cite: 12].
-* **🤖 Analisi AI Avanzata:**
-    * [cite_start]**Singola Corsa:** Confronta l'allenamento reale (passo, bpm, lap) con l'obiettivo prefissato nelle note[cite: 13, 197].
-    * [cite_start]**Report Settimanale:** Schedulato in automatico ogni domenica sera, valuta il volume e la qualità della settimana in corso rispetto alla preparazione di 10km/mezze maratone[cite: 14, 144].
-* **👟 Gestione Scarpiera Intelligente:**
-    * [cite_start]Sincronizzazione automatica dei modelli attivi da Runalyze[cite: 15, 128].
-    * [cite_start]Valutazione predittiva dell'usura dei materiali incrociata dinamicamente con il peso aggiornato dell'atleta[cite: 16, 133].
-* **📸 OCR su Metriche Corporee:**
-    * [cite_start]Invia lo screenshot di una bilancia smart: l'agente (tramite Gemini Flash) estrarrà automaticamente data, peso, IMC e percentuali salvandole direttamente nel database[cite: 17, 70, 138].
-* **💬 Chat Contestuale AI:**
-    * Chiedi consigli al coach in linguaggio naturale. [cite_start]L'agente "ricorda" lo storico delle tue ultime interazioni e il contesto delle tue ultime 100 corse[cite: 18, 19].
+Unlike traditional bots that passively receive and forward data, MyRunningAgent employs an agentic architecture:
+- **Model Context Protocol (MCP) Bridge:** The AI (Gemini 3.5 Flash) connects to Runalyze APIs via HTTP Server-Sent Events. It autonomously browses available tools (e.g., `get_activities`, `get_health_metrics`) and decides which endpoints to call in a multi-turn loop to answer user queries.
+- **Context Orchestration:** The orchestrator fuses historical state data stored in Firestore (e.g., last weigh-in, active training plans) with real-time Runalyze telemetry, injecting a comprehensive "invisible context" into the LLM prompt.
+- **Serverless Infrastructure:** Hosted on Google Cloud Run (scaling from 0 to 3 instances) with asynchronous threading to respect Telegram's strict 10-second webhook timeouts.
 
----
+## ✨ Core Features
 
-## 🏗️ Architettura del Software
+*   📅 **Smart Workout Planning:** Create, edit, and track weekly training plans directly via Telegram inline buttons (✅ Complete, ↩️ Reopen, ❌ Delete).
+*   📊 **Body Metrics OCR:** Send a screenshot of your smart scale app; the agent uses Vision capabilities to automatically extract weight, body fat, muscle mass, water, and bone mass, saving the structured data to Firestore.
+*   👟 **Dynamic Shoe Management:** Cross-references Runalyze mileage with current body weight to evaluate foam wear-and-tear and shoe responsiveness.
 
-Il progetto è strutturato seguendo il pattern **Controller-Service** per garantire scalabilità e single-responsibility:
+## 🛠️ Technology Stack
 
-* **`webhook.py`**: L'entry point. [cite_start]Smista le richieste HTTP in arrivo da Telegram e da Cloud Scheduler e serve le API per la Web App[cite: 20, 21].
-* **`app/orchestrator.py`**: Il *cervello* operativo. [cite_start]Coordina i servizi e contiene tutta la logica di business e la preparazione dei dati per la dashboard[cite: 22, 162].
-* **`app/runalyze_client.py`**: Modulo ETL per l'integrazione con Runalyze. [cite_start]Esegue micro-sincronizzazioni intelligenti e importazioni storiche massive[cite: 23].
-* **`app/database.py`**: Gestore Firestore. [cite_start]Amministra le collezioni per attività, metriche, piani settimanali e storico chat[cite: 24, 79].
-* **`app/analyst.py` & `app/prompts.py`**: Moduli AI disaccoppiati. Elaborano prompt complessi usando i modelli Gemini[cite: 25, 41].
-* [cite_start]**`app/telegram_client.py`**: Wrapper per comunicare con l'API di Telegram ed effettuare il parsing di testo e immagini[cite: 26, 253].
+*   **Language:** Python 3.11
+*   **Web Framework:** Flask
+*   **AI Engine:** Google GenAI SDK (`gemini-3.5-flash`)
+*   **Cloud Hosting:** Google Cloud Run
+*   **Database:** Google Cloud Firestore (NoSQL)
+*   **Security:** HMAC-SHA256 (Webhook validation), Google Secret Manager
+*   **Data Source:** Runalyze API
 
----
+## 📂 Repository Structure
 
-## 🛠️ Comandi Telegram Supportati
+```text
+├── webhook.py          # Flask entry-point, HMAC-SHA256 validation, Telegram cache & threading
+├── orchestrator.py     # Business logic, Omni-Context formatting, inline keyboard routing
+├── analyst.py          # AI engine, MCP loop, Prompt management, OCR execution
+├── database.py         # Firestore CRUD (activities, metrics, training_plans, ai_chats)
+├── mcp_bridge.py       # Server-Sent Events bridge mapping Runalyze APIs to MCP tools
+├── telegram_client.py  # Messaging, HTML formatting, plain-text fallbacks, image handling
+├── requirements.txt    # Python dependencies
+└── .env.example        # Environment variables template
+```
 
-| Comando | Descrizione |
-| :--- | :--- |
-| `/dashboard` | **[NUOVO]** Apre la Web App integrata per visualizzare i grafici dei tuoi allenamenti e le metriche di peso. |
-| `/pianifica` | [cite_start]Inserisci un nuovo piano settimanale separando le sessioni con una riga vuota[cite: 27, 28]. |
-| `/piano` | [cite_start]Visualizza il piano corrente con bottoni interattivi (Chiudi, Riapri, Elimina)[cite: 28, 29]. |
-| `/modifica [ID]` | [cite_start]Modifica i dettagli (gli step) di una specifica sessione mantenendola attiva (es. `/modifica 0`)[cite: 29, 30]. |
-| `/scarpe` | [cite_start]Mostra la scarpiera attuale e permette di lanciare l'analisi diagnostica sullo stato dei materiali[cite: 30, 31]. |
-| `/syncstorico [anno]` | [cite_start]Scarica da Runalyze e salva su DB tutte le corse di un anno specifico (es. `/syncstorico 2026`)[cite: 31, 32]. |
-| *Invia Foto* | [cite_start]Manda un'immagine per attivare la pipeline OCR di estrazione dati (es. metriche bilancia)[cite: 32, 33]. |
-| *Testo Libero* | [cite_start]Scrivi un messaggio testuale normale per conversare con il tuo coach virtuale[cite: 33, 34]. |
+## 🚀 Local Setup
 
----
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/my-running-agent.git
+   cd my-running-agent
+   ```
 
-## 🚀 Deployment (Google Cloud Platform)
+2. **Set up a virtual environment:**
+   ```bash
+   python3.11 -m venv venv
+   source venv/bin/activate
+   ```
 
-Il progetto gira in modalità serverless:
-* [cite_start]**Cloud Run**: Esegue l'applicazione Flask e gestisce certificati HTTPS nativi necessari per la Telegram Mini App[cite: 37, 75].
-* **Firestore**: Database NoSQL per memorizzare stato, sessioni e storico[cite: 38].
-* [cite_start]**Secret Manager**: Protegge token e chiavi (`TELEGRAM_TOKEN`, `RUNALYZE_CLIENT_ID`, `RUNALYZE_CLIENT_SECRET`, `RUNALYZE_REFRESH_TOKEN`, `GEMINI_API_KEY`, `WEBAPP_URL`)[cite: 39, 76, 77].
-* [cite_start]**Cloud Scheduler**: Job Cron automatizzato che triggera il report settimanale ogni domenica alle 20:00[cite: 40].
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure Environment Variables:**
+   Copy the example environment file and fill in your keys.
+   ```bash
+   cp .env.example .env
+   ```
+   *Required variables:* `TELEGRAM_BOT_TOKEN`, `RUNALYZE_PERSONAL_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`.
+
+5. **Run locally:**
+   ```bash
+   python webhook.py
+   ```
+   *(Note: You will need a tunneling tool like [ngrok](https://ngrok.com/) to expose your local server to the Telegram Webhook).*
+
+## ⚠️ Limitations & Workarounds
+* **Telegram Timeouts:** Mitigated via early 200 OK responses and background threading.
+* **LLM Rate Limits (429/503):** Handled via strict tool-calling constraints and retry logic.
+* **Markdown Rendering Errors (400):** Implemented a try/except fallback to plain text if the AI generates unparseable HTML tags for Telegram.
+
+## 📄 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
