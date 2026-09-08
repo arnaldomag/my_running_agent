@@ -43,10 +43,19 @@ class RunalyzeMCPBridge:
             
             for p_name, p_val in input_schema.get("properties", {}).items():
                 schema_type = p_val.get("type", "string").upper()
-                props[p_name] = types.Schema(
-                    type=schema_type,
-                    description=p_val.get("description", "")
-                )
+                
+                # Parametri base
+                schema_args = {
+                    "type": schema_type,
+                    "description": p_val.get("description", "")
+                }
+                
+                # FIX: Gestione specifica per gli ARRAY
+                if schema_type == "ARRAY" and "items" in p_val:
+                    item_type = p_val["items"].get("type", "string").upper()
+                    schema_args["items"] = types.Schema(type=item_type)
+                
+                props[p_name] = types.Schema(**schema_args)
             
             gemini_funcs.append(types.FunctionDeclaration(
                 name=t.get("name"),
