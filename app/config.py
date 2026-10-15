@@ -1,39 +1,60 @@
+from functools import lru_cache
+import logging
 import os
+
+from dotenv import load_dotenv
 import google.auth
 from google.cloud import secretmanager
-from dotenv import load_dotenv
-load_dotenv() # Questo carica il file .env nelle variabili d'ambiente
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+
 
 class Config:
     def __init__(self):
-        # 1. Riconoscimento Ambiente
-        # Se esiste K_SERVICE, siamo su Google Cloud Run
-        self.is_cloud = os.getenv('K_SERVICE') is not None
-        
+        # 1. Riconoscimento Ambiente (K_SERVICE indica Google Cloud Run)
+        self.is_cloud: bool = os.getenv("K_SERVICE") is not None
+
         # 2. Identificazione Progetto
-        try:
-            _, self.project_id = google.auth.default()
-        except:
-            self.project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "my-running-agent")
+        self.project_id: str | None = os.getenv("GOOGLE_CLOUD_PROJECT")
+        if not self.project_id:
+            try:
+                _, self.project_id = google.auth.default()
+            except Exception:
+                self.project_id = "my-running-agent"
 
-        # ==================================================
-        # 3. VARIABILI DI CONFIGURAZIONE (Task 4.2)
-        # ==================================================
+        # Client Secret Manager inizializzato in modo lazy solo se necessario
+        self._sm_client: secretmanager.SecretManagerServiceClient | None = None
 
-    def get_secret(self, name, default=None):
-        """Recupera un segreto da Secret Manager (Cloud) o .env (Locale)"""
+    @property
+    def sm_client(self) -> secretmanager.SecretManagerServiceClient:
+        if self._sm_client is None:
+            self._sm_client = secretmanager.SecretManagerServiceClient()
+        return self._sm_client
+
+    @lru_cache(maxsize=32)
+    def get_secret(self, name: str, default: str | None = None) -> str | None:
+        """
+        Recupera un segreto con caching in-memory.
+        1. Controlla prima le variabili d'ambiente (istantaneo, funziona sia in locale
+           sia su Cloud Run se i segreti sono montati come env vars).
+        2. Se siamo in Cloud e non è nell'env, interroga Secret Manager UNA SOLA VOLTA
+           grazie a @lru_cache e riutilizza lo stesso canale gRPC.
+        """
+        env_val = os.getenv(name)
+        if env_val:
+            return env_val.strip()
+
         if self.is_cloud:
             try:
-                client = secretmanager.SecretManagerServiceClient()
                 resource_name = f"projects/{self.project_id}/secrets/{name}/versions/latest"
-                response = client.access_secret_version(request={"name": resource_name})
-                return response.payload.data.decode("UTF-8")
+                response = self.sm_client.access_secret_version(request={"name": resource_name})
+                return response.payload.data.decode("UTF-8").strip()
             except Exception as e:
-                print(f"⚠️ Errore Secret Manager per {name}: {e}")
-                return os.getenv(name, default)
-        
-        # In locale usa le variabili d'ambiente caricate da VS Code o .env
-        return os.getenv(name, default)
+                logger.warning("⚠️ [CONFIG] Errore Secret Manager per '%s': %s", name, e)
+                return default
 
-# Creiamo un'istanza pronta all'uso
+        return default
+
+
 config = Config()
