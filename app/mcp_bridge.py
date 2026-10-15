@@ -181,16 +181,14 @@ class RunalyzeMCPBridge:
                 session_id, tool_result_text = self._call_mcp_tool(session_id, call.name, call.args)
 
                 tool_parts.append(
-                    types.Part(
-                        function_response=types.FunctionResponse(
-                            name=call.name,
-                            response={"result": tool_result_text}
-                        )
+                    types.Part.from_function_response(
+                        name=call.name,
+                        response={"result": tool_result_text}
                     )
                 )
 
-            # Raggruppiamo tutte le risposte dei tool del turno in un unico blocco Content
-            contents.append(types.Content(role="tool", parts=tool_parts))
+            # NOTA CRITICA SDK GEMINI: Le risposte delle funzioni richiedono role="user" (non "tool")
+            contents.append(types.Content(role="user", parts=tool_parts))
 
             logger.info("🧠 [MCP-HTTP] Invio dati estratti a Gemini (Turno %d)...", turn_count)
             response = self.gemini_client.models.generate_content(
