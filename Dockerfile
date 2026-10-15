@@ -1,22 +1,22 @@
-# Usa un'immagine Python ufficiale e leggera
 FROM python:3.11-slim
 
-# Evita la creazione di file .pyc e assicura log immediati
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
 
-# Imposta la cartella di lavoro nel container
 WORKDIR /app
 
-# Copia e installa le dipendenze
+# Installiamo prima le dipendenze per sfruttare la layer cache di Docker
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copia tutto il resto del codice
-COPY . .
+# Copiamo solo il codice applicativo necessario in produzione
+COPY app/ ./app/
+COPY main.py webhook.py ./
 
-# Espone la porta usata nativamente da Cloud Run
 EXPOSE 8080
 
-# Comando per avviare il server web con Gunicorn (invece dello script singolo)
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "0", "webhook:app"]
+# 1 worker con 8 thread (gthread): massimizza la condivisione della cache MCP in RAM
+# e gestisce fino a 8 richieste HTTP concorrenti senza blocchi.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "0", "webhook:app"]
