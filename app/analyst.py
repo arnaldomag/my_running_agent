@@ -36,6 +36,10 @@ class RunningAnalyst:
             role = turn.get("role")
             if not role:
                 continue
+            # Normalizza eventuali vecchi record salvati con role='tool' in 'user'
+            if role == "tool":
+                role = "user"
+
 
             parts_raw = turn.get("parts", [])
             if not isinstance(parts_raw, list):
