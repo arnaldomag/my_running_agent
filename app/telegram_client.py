@@ -1,79 +1,104 @@
+import logging
+from typing import Any
+
 import requests
-import json
+
 from .config import config
 
+logger = logging.getLogger(__name__)
+
+
 class TelegramNotifier:
+    DEFAULT_TIMEOUT = 10
+
     def __init__(self):
         self.token = config.get_secret("TELEGRAM_TOKEN")
         self.chat_id = config.get_secret("TELEGRAM_CHAT_ID")
-        # Costruiamo l'URL base dell'API per il nostro bot
-        self.api_url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        self.base_url = f"https://api.telegram.org/bot{self.token}"
+        self.file_base_url = f"https://api.telegram.org/file/bot{self.token}"
 
-    def send_message(self, text, reply_markup=None):
-        if not self.token or not self.chat_id:
-            print("⚠️ Credenziali Telegram mancanti (Token o Chat ID). Notifica saltata.")
+        # Sessione persistente TCP/TLS Keep-Alive verso api.telegram.org
+        self.session = requests.Session()
+
+    def send_message(
+        self,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        chat_id: int | str | None = None
+    ) -> bool:
+        target_chat_id = chat_id or self.chat_id
+        if not self.token or not target_chat_id:
+            logger.warning("⚠️ Credenziali Telegram mancanti (Token o Chat ID). Notifica saltata.")
             return False
 
-        payload = {
-            "chat_id": self.chat_id,
+        url = f"{self.base_url}/sendMessage"
+        payload: dict[str, Any] = {
+            "chat_id": target_chat_id,
             "text": text,
             "parse_mode": "HTML"
         }
-        
-        # OTTIMIZZAZIONE: Convertiamo il dizionario in stringa JSON esplicita per evitare 
-        # rari errori 400 "Bad Request" dall'API di Telegram sui bottoni inline
+
         if reply_markup:
-            payload["reply_markup"] = json.dumps(reply_markup)
+            payload["reply_markup"] = reply_markup
 
         try:
-            # 1. PRIMO TENTATIVO: Invio con formattazione HTML
-            response = requests.post(self.api_url, data=payload)
-            
-            # Se Telegram rifiuta il pacchetto per via di tag HTML rotti (Errore 400)
+            # Usando json=payload, requests serializza nativamente anche i dict annidati (reply_markup)
+            response = self.session.post(url, json=payload, timeout=self.DEFAULT_TIMEOUT)
+
+            # Fallback automatico se l'AI ha generato tag HTML non chiusi/non validi (HTTP 400)
             if response.status_code == 400:
-                print(f"⚠️ [TELEGRAM] Errore di formattazione HTML rilevato ({response.text}). Attivazione Fallback...")
-                
-                # Rimuoviamo il vincolo HTML
+                logger.warning(
+                    "⚠️ [TELEGRAM] Errore HTML rilevato (%s). Invio fallback in plain-text...",
+                    response.text
+                )
                 payload.pop("parse_mode", None)
-                
-                # 2. SECONDO TENTATIVO: Invio come testo semplice
-                fallback_response = requests.post(self.api_url, data=payload)
-                fallback_response.raise_for_status() # Solleva errore se fallisce anche questo
-                
-                print("✅ Messaggio di emergenza inviato con successo (senza HTML).")
+                fallback_resp = self.session.post(url, json=payload, timeout=self.DEFAULT_TIMEOUT)
+                fallback_resp.raise_for_status()
                 return True
-                
-            # Se la richiesta originale ha dato un errore diverso (es. 401 Unauthorized), lo solleva
-            response.raise_for_status() 
+
+            response.raise_for_status()
             return True
-            
+
         except requests.exceptions.RequestException as e:
-            print(f"❌ Errore nell'invio a Telegram: {e}")
+            logger.error("❌ [TELEGRAM] Errore nell'invio del messaggio: %s", e)
             return False
 
-    def download_file(self, file_id):
-        """Scarica un file dai server di Telegram e ne restituisce i bytes"""
+    def answer_callback_query(self, callback_query_id: str) -> bool:
+        """Spegne l'indicatore di caricamento sui bottoni inline riutilizzando la Session."""
+        if not self.token or not callback_query_id:
+            return False
         try:
-            print(f"⬇️ [TG_CLIENT] Richiesta path per file_id: {file_id}")
-            
-            # 1. Chiediamo a Telegram dove si trova fisicamente il file
-            url_path = f"https://api.telegram.org/bot{self.token}/getFile?file_id={file_id}"
-            response = requests.get(url_path)
-            response.raise_for_status()
-            path_data = response.json()
-            
-            file_path = path_data['result']['file_path']
-            
-            # 2. Scarichiamo i bytes dell'immagine vera e propria
-            url_file = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
-            file_response = requests.get(url_file)
-            file_response.raise_for_status()
-            
-            print("✅ [TG_CLIENT] Immagine scaricata con successo.")
-            return file_response.content
-            
+            url = f"{self.base_url}/answerCallbackQuery"
+            self.session.post(url, json={"callback_query_id": callback_query_id}, timeout=5)
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.warning("⚠️ [TELEGRAM] Errore answerCallbackQuery: %s", e)
+            return False
+
+    def download_file(self, file_id: str) -> bytes | None:
+        """Scarica un file dai server di Telegram riutilizzando la connessione Keep-Alive."""
+        try:
+            logger.info("⬇️ [TG_CLIENT] Richiesta path per file_id: %s", file_id)
+            resp_path = self.session.get(
+                f"{self.base_url}/getFile",
+                params={"file_id": file_id},
+                timeout=self.DEFAULT_TIMEOUT
+            )
+            resp_path.raise_for_status()
+            file_path = resp_path.json()["result"]["file_path"]
+
+            file_resp = self.session.get(
+                f"{self.file_base_url}/{file_path}",
+                timeout=self.DEFAULT_TIMEOUT
+            )
+            file_resp.raise_for_status()
+
+            logger.info("✅ [TG_CLIENT] Immagine scaricata con successo (%d bytes).", len(file_resp.content))
+            return file_resp.content
+
         except Exception as e:
-            print(f"❌ [TG_CLIENT] Errore nel download dell'immagine: {e}")
+            logger.error("❌ [TG_CLIENT] Errore nel download dell'immagine: %s", e)
             return None
+
 
 notifier = TelegramNotifier()

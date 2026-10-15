@@ -1,133 +1,116 @@
-# app/runalyze_client.py
 from datetime import datetime
+import logging
+import time
+from typing import Any
+
 import requests
+
 from app.config import config
 
+logger = logging.getLogger(__name__)
+
+
 class RunalyzeClient:
+    CACHE_TTL_SECONDS = 300  # 5 minuti di cache per l'anagrafica scarpe
+    DEFAULT_TIMEOUT = 15
+
     def __init__(self):
-        # Utilizziamo il Personal Token standard (senza "pt#")
-        self.token = config.get_secret("RUNALYZE_TOKEN").replace("pt#", "") 
+        raw_token = config.get_secret("RUNALYZE_TOKEN") or ""
+        self.token = raw_token.replace("pt#", "").strip()
         self.base_url = "https://runalyze.com/api/v1"
-        self.headers = {"token": self.token}
 
-    def sync_new_activities(self, db):
-        """Scarica le ultime attività e salva SOLO quelle nuove"""
-        print("🔄 [ETL] Avvio sincronizzazione incrementale da Runalyze...")
-        try:
-            # Puoi regolare il limite se vuoi, 20 o 100 non cambia nulla ora
-            # perché il ciclo si fermerà automaticamente appena trova dati già noti.
-            url = f"{self.base_url}/activity?limit=20"
-            res = requests.get(url, headers=self.headers)
-            res.raise_for_status()
-            
-            activities = res.json()
-            synced_count = 0
-            
-            for act in activities:
-                activity_id = str(act.get("id"))
-                
-                # --- NOVITÀ: CONTROLLO INCREMENTALE ---
-                doc_ref = db.db.collection(db.collection_name).document(activity_id)
-                if doc_ref.get().exists:
-                    # Trovata un'attività già presente! 
-                    # Siccome le API restituiscono le corse in ordine decrescente,
-                    # se questa esiste già, significa che tutte le successive sono storiche.
-                    # Blocchiamo il ciclo per risparmiare tempo e operazioni.
-                    print(f"ℹ️ Attività {activity_id} già presente, interrompo il sync.")
-                    break 
-                # --------------------------------------
+        # Sessione persistente TCP Keep-Alive
+        self.session = requests.Session()
+        self.session.headers.update({
+            "token": self.token,
+            "Accept": "application/json"
+        })
 
-                # Estraiamo l'equipaggiamento per salvare le scarpe usate
-                scarpe_usate = "Non specificate"
-                equip_list = act.get('equipment', [])
-                if equip_list:
-                    scarpe_usate = ", ".join([e.get('name', '') for e in equip_list])
+        # Cache leggera in-memory per evitare chiamate doppie tra /scarpe e click sul bottone
+        self._shoes_cache: list[dict[str, Any]] | None = None
+        self._shoes_cache_time: float = 0.0
 
-                # Mappatura dei dati per Firestore
-                dati_corsa = {
-                    "id": activity_id,
-                    "nome": act.get("name", "Corsa"),
-                    "start_date": act.get("date_time", ""),
-                    "distanza": act.get("distance", 0),
-                    "tempo_movimento": act.get("duration", 0) / 60, # Convertito in minuti
-                    "scarpe": scarpe_usate,
-                    "sport": act.get("sport", {}).get("name", "Running")
-                }
-                
-                # Salvataggio su database
-                if db.update_activity(dati_corsa):
-                    synced_count += 1
-                    
-            return synced_count
-            
-        except Exception as e:
-            print(f"❌ [ETL] Errore durante il sync API: {e}")
-            return 0
+    def fetch_athlete_shoes(self, force_refresh: bool = False) -> list[dict[str, Any]]:
+        """Recupera l'elenco delle scarpe dal profilo Runalyze (con cache TTL di 5 minuti)."""
+        now = time.monotonic()
+        if not force_refresh and self._shoes_cache is not None and (now - self._shoes_cache_time) < self.CACHE_TTL_SECONDS:
+            return self._shoes_cache
 
-    def fetch_athlete_shoes(self):
-        """Recupera l'elenco completo delle scarpe dal profilo"""
         try:
             url = f"{self.base_url}/equipment"
-            res = requests.get(url, headers=self.headers)
+            res = self.session.get(url, timeout=self.DEFAULT_TIMEOUT)
             res.raise_for_status()
-            return res.json()
-        except Exception as e:
-            print(f"❌ [API] Errore recupero scarpe: {e}")
-            return []
+            data = res.json()
 
-    def fetch_gear_details(self, gear_id):
-        """Recupera i dettagli di un singolo modello tramite ID"""
+            if isinstance(data, list):
+                self._shoes_cache = data
+                self._shoes_cache_time = now
+                return data
+            return []
+        except Exception as e:
+            logger.error("❌ [API] Errore recupero scarpe da Runalyze: %s", e)
+            return self._shoes_cache or []
+
+    def fetch_gear_details(self, gear_id: str | int) -> dict[str, Any] | None:
+        """
+        Recupera i dettagli di un singolo modello tramite ID.
+        Controlla prima nella cache della scarpiera per rispondere in 0 ms senza rete.
+        """
+        target_id = str(gear_id)
+
+        # 1. Fast-path: se abbiamo appena scaricato la lista con /scarpe, il dato è già in RAM!
+        if self._shoes_cache:
+            for item in self._shoes_cache:
+                if str(item.get("id")) == target_id:
+                    return item
+
+        # 2. Fallback: chiamata API puntuale
         try:
-            url = f"{self.base_url}/equipment/{gear_id}"
-            res = requests.get(url, headers=self.headers)
+            url = f"{self.base_url}/equipment/{target_id}"
+            res = self.session.get(url, timeout=self.DEFAULT_TIMEOUT)
             res.raise_for_status()
             return res.json()
         except Exception as e:
-            print(f"❌ [API] Errore recupero dettaglio equipaggiamento {gear_id}: {e}")
+            logger.error("❌ [API] Errore recupero dettaglio equipaggiamento %s: %s", target_id, e)
             return None
 
-    def upload_body_metrics(self, dati_corporei):
-        """Carica le metriche corporee su Runalyze tramite chiamata POST"""
-        print("🏋️ [API] Invio composizione corporea a Runalyze...")
+    @staticmethod
+    def _safe_float(dati: dict[str, Any], key: str) -> float:
+        val = dati.get(key)
+        if not val:
+            return 0.0
+        try:
+            return float(str(val).replace(",", ".").strip())
+        except ValueError:
+            return 0.0
+
+    def upload_body_metrics(self, dati_corporei: dict[str, Any]) -> bool:
+        """Carica le metriche corporee su Runalyze tramite chiamata POST."""
+        logger.info("🏋️ [API] Invio composizione corporea a Runalyze...")
         try:
             url = f"{self.base_url}/metrics/bodyComposition"
-            
-            # Timestamp in formato standard ISO 8601 compatibile con l'API
-            now_iso = datetime.now().isoformat()
-            
-            # Helper interno per garantire che i valori passati siano float validi per il JSON
-            def _safe_float(key):
-                val = dati_corporei.get(key, 0)
-                if not val: 
-                    return 0.0
-                try:
-                    return float(str(val).replace(',', '.'))
-                except ValueError:
-                    return 0.0
-
             payload = {
-                "date_time": now_iso,
-                "weight": _safe_float('peso_kg'),
-                "fat_percentage": _safe_float('massa_grassa_percentuale'),
-                "water_percentage": _safe_float('massa_idrica_percentuale'),
-                "muscle_percentage": _safe_float('massa_muscolare_percentuale'),
-                "bone_percentage": _safe_float('massa_ossea_percentuale')
+                "date_time": datetime.now().isoformat(),
+                "weight": self._safe_float(dati_corporei, "peso_kg"),
+                "fat_percentage": self._safe_float(dati_corporei, "massa_grassa_percentuale"),
+                "water_percentage": self._safe_float(dati_corporei, "massa_idrica_percentuale"),
+                "muscle_percentage": self._safe_float(dati_corporei, "massa_muscolare_percentuale"),
+                "bone_percentage": self._safe_float(dati_corporei, "massa_ossea_percentuale")
             }
-            
-            res = requests.post(url, headers=self.headers, json=payload)
+
+            res = self.session.post(url, json=payload, timeout=self.DEFAULT_TIMEOUT)
             res.raise_for_status()
-            
-            print("✅ [API] Dati corporei caricati con successo su Runalyze.")
+
+            logger.info("✅ [API] Dati corporei caricati con successo su Runalyze.")
             return True
-            
+
         except requests.exceptions.HTTPError as errh:
-            print(f"❌ [API] Errore HTTP Runalyze: {errh}")
-            if hasattr(errh, 'response') and errh.response is not None:
-                print(f"Dettaglio: {errh.response.text}")
+            dettaglio = errh.response.text if errh.response is not None else "Nessun dettaglio"
+            logger.error("❌ [API] Errore HTTP Runalyze (%s): %s", errh, dettaglio)
             return False
         except Exception as e:
-            print(f"❌ [API] Errore di sistema nel caricamento metriche: {e}")
+            logger.error("❌ [API] Errore di sistema nel caricamento metriche: %s", e)
             return False
 
-# Istanza pronta all'uso
+
 runalyze_client = RunalyzeClient()

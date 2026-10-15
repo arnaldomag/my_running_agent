@@ -34,7 +34,6 @@ orchestrator = BotOrchestrator(db, analyst, notifier, runalyze_client)
 # ==================================================
 # THREAD POOL & DEDUPLICAZIONE O(1) THREAD-SAFE
 # ==================================================
-# Pool limitato per evitare picchi di memoria/CPU creando infiniti thread
 MAX_WORKERS = int(os.environ.get("WEBHOOK_MAX_WORKERS", 8))
 executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="bot_worker")
 
@@ -130,13 +129,9 @@ def verify_telegram_data(init_data_str: str) -> bool:
 # DISPATCHING COMANDI E CALLBACK
 # ==================================================
 def _dispatch_text_command(chat_id: int, testo: str, testo_lower: str) -> None:
-    """Instrada i comandi slash verso il ThreadPool."""
+    """Instrada i comandi slash verso il ThreadPool (senza più sincronizzazione Firestore)."""
     if testo_lower in ("/elenco scarpe", "/elencoscarpe", "/scarpe"):
         submit_background_task(orchestrator.process_shoe_list, chat_id)
-    elif testo_lower.startswith("/syncstorico"):
-        submit_background_task(orchestrator.handle_sync_storico, testo)
-    elif testo_lower == "/sync":
-        submit_background_task(orchestrator.handle_sync_incrementale)
     elif testo_lower.startswith("/pianifica"):
         submit_background_task(orchestrator.handle_plan_creation, testo)
     elif testo_lower == "/piano":
@@ -151,26 +146,25 @@ def _dispatch_callback_query(query: dict[str, Any]) -> None:
     """Instrada i click sui bottoni inline senza bloccare il thread HTTP di Flask."""
     callback_data: str = query.get("data", "")
     query_id: str = query.get("id", "")
+    chat_id_btn = query.get("message", {}).get("chat", {}).get("id")
 
-    # Rispondiamo subito alla callback in background per spegnere lo spinner su Telegram
+    # Spegniamo subito lo spinner di caricamento sul bottone Telegram
     if query_id:
         submit_background_task(orchestrator.answer_callback, query_id)
 
     if callback_data.startswith("analyze_"):
         activity_id = callback_data.removeprefix("analyze_")
-        submit_background_task(orchestrator.process_run_analysis, activity_id)
+        submit_background_task(orchestrator.process_run_analysis, activity_id, chat_id_btn)
+
+    elif callback_data.startswith("shoe_"):
+        gear_id = callback_data.removeprefix("shoe_")
+        submit_background_task(orchestrator.process_shoe_analysis, chat_id_btn, gear_id)
 
     elif callback_data == "fallback_last_week_show":
         submit_background_task(orchestrator.process_fallback_weekly_report)
 
     elif callback_data == "fallback_last_week_ignore":
         submit_background_task(orchestrator.handle_fallback_ignore)
-
-    elif callback_data.startswith("shoe_"):
-        gear_id = callback_data.removeprefix("shoe_")
-        chat_id_btn = query.get("message", {}).get("chat", {}).get("id")
-        if chat_id_btn:
-            submit_background_task(orchestrator.process_shoe_analysis, chat_id_btn, gear_id)
 
     elif callback_data.startswith("man_done_"):
         session_id = callback_data.removeprefix("man_done_")
@@ -191,7 +185,6 @@ def _dispatch_callback_query(query: dict[str, Any]) -> None:
 @app.route("/telegram-webhook", methods=["POST"])
 def telegram_webhook():
     try:
-        # silent=True evita eccezioni se il payload non è un JSON valido
         update = request.get_json(silent=True)
         if not update:
             return jsonify({"status": "ignored", "reason": "empty_payload"}), 200
@@ -218,7 +211,7 @@ def telegram_webhook():
 
                 return jsonify({"status": "ok"}), 200
 
-            # 2. Gestione Foto (spostata su ThreadPool per evitare timeout OCR)
+            # 2. Gestione Foto (OCR Bilancia)
             if "photo" in message:
                 submit_background_task(orchestrator.process_incoming_photo, message["photo"])
                 return jsonify({"status": "ok"}), 200
@@ -232,33 +225,10 @@ def telegram_webhook():
 
     except Exception as global_error:
         logger.exception("💥 [WEBHOOK] Errore critico nella rotta: %s", global_error)
-        # Restituiamo comunque 200 a Telegram in caso di bug applicativo interno
-        # per evitare loop infiniti di retry da parte dei server di Telegram.
         return jsonify({"status": "error", "message": str(global_error)}), 200
 
 
 @app.route("/tasks/weekly-report", methods=["POST"])
 def tasks_weekly_report():
-    """
-    Endpoint per Cloud Scheduler.
-    Nota: Se eseguito su Cloud Run con 'CPU allocated only during request',
-    è preferibile eseguirlo in modo sincrono (o attendere il future) così che
-    Cloud Run non tagli la CPU a metà generazione del report.
-    """
     try:
-        logger.info("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler!")
-        mio_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or config.get_secret("TELEGRAM_CHAT_ID")
-        
-        # Esecuzione sincrona per mantenere attiva l'allocazione CPU di Cloud Run
-        # (Cloud Scheduler ha un timeout predefinito di 3 minuti, ampiamente sufficiente)
-        orchestrator.process_cron_weekly_report(mio_chat_id)
-        
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        logger.exception("❌ [CRON] Errore durante l'esecuzione del cron job: %s", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+        logger.info("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler

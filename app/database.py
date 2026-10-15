@@ -1,233 +1,207 @@
-from google.cloud import firestore
-from .config import config
-from datetime import date, datetime, timezone
+import logging
+from datetime import date
+from typing import Any
+
 from google import genai
+from google.cloud import firestore
+
+from .config import config
+
+logger = logging.getLogger(__name__)
+
 
 class RunningDB:
+    MAX_HISTORY_LENGTH = 10
+
     def __init__(self):
         self.db = firestore.Client(project=config.project_id, database="my-running-agent")
-        self.collection_name = "attivita"
 
     # ==========================================
     # 1. GESTIONE CRONOLOGIA AI (CHAT)
     # ==========================================
-    def get_chat_history(self, chat_id):
-        """Recupera la cronologia dei messaggi e la converte in oggetti Content dell'SDK"""
+    def get_chat_history(self, chat_id: int | str) -> tuple[list[genai.types.Content], list[dict[str, Any]]]:
+        """Recupera la cronologia dei messaggi e la converte in oggetti Content dell'SDK."""
         try:
-            doc_ref = self.db.collection("ai_chats").document(str(chat_id))
-            doc = doc_ref.get()
-            
-            history_dicts = []
-            if doc.exists:
-                history_dicts = doc.to_dict().get("history", [])
-                
-            contents = []
-            for msg in history_dicts:
-                text_part = msg["parts"][0] if isinstance(msg["parts"], list) else msg["parts"]
-                content_obj = genai.types.Content(
+            doc = self.db.collection("ai_chats").document(str(chat_id)).get()
+            if not doc.exists:
+                return [], []
+
+            history_dicts: list[dict[str, Any]] = doc.to_dict().get("history", [])
+            contents = [
+                genai.types.Content(
                     role=msg["role"],
-                    parts=[genai.types.Part.from_text(text=text_part)]
+                    parts=[genai.types.Part.from_text(
+                        text=msg["parts"][0] if isinstance(msg["parts"], list) else msg["parts"]
+                    )]
                 )
-                contents.append(content_obj)
-                
+                for msg in history_dicts
+            ]
             return contents, history_dicts
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nel recupero della cronologia chat: {e}")
+            logger.error("❌ [DATABASE] Errore nel recupero della cronologia chat: %s", e)
             return [], []
 
-    def save_chat_interaction(self, chat_id, history_dicts, user_text, bot_reply):
-        """Aggiorna l'array della cronologia mantenendo al massimo gli ultimi 10 messaggi"""
+    def save_chat_interaction(
+        self,
+        chat_id: int | str,
+        history_dicts: list[dict[str, Any]],
+        user_text: str,
+        bot_reply: str
+    ) -> bool:
+        """Aggiorna l'array della cronologia mantenendo al massimo gli ultimi 10 messaggi."""
         try:
             doc_ref = self.db.collection("ai_chats").document(str(chat_id))
-            
+
             history_dicts.append({"role": "user", "parts": [user_text]})
             history_dicts.append({"role": "model", "parts": [bot_reply]})
-            
-            MAX_HISTORY_LENGTH = 10
-            if len(history_dicts) > MAX_HISTORY_LENGTH:
-                history_dicts = history_dicts[-MAX_HISTORY_LENGTH:]
-                
+
+            if len(history_dicts) > self.MAX_HISTORY_LENGTH:
+                history_dicts = history_dicts[-self.MAX_HISTORY_LENGTH:]
+
             doc_ref.set({
                 "last_updated": firestore.SERVER_TIMESTAMP,
                 "history": history_dicts
             }, merge=True)
-            
             return True
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nel salvataggio della cronologia chat: {e}")
+            logger.error("❌ [DATABASE] Errore nel salvataggio della cronologia chat: %s", e)
             return False
 
-    def run_test_write(self):
-        doc_ref = self.db.collection('health_checks').document('current')
+    def run_test_write(self) -> bool:
+        doc_ref = self.db.collection("health_checks").document("current")
         doc_ref.set({
             "status": "healthy",
-            "last_check": firestore.SERVER_TIMESTAMP 
+            "last_check": firestore.SERVER_TIMESTAMP
         })
         return True
 
     # ==========================================
-    # 2. GESTIONE ATTIVITÀ (ETL)
+    # 2. GESTIONE METRICHE CORPOREE (BILANCIA)
     # ==========================================
-    def update_activity(self, activity_data):
-        activity_id = str(activity_data.get('id'))
-        if not activity_id:
-            print("❌ Impossibile salvare: ID attività mancante.")
-            return False
- 
-        doc_ref = self.db.collection(self.collection_name).document(activity_id)
-        doc_ref.set(activity_data, merge=True)
-        return True
-
-    def get_recent_runs(self, limit=10):
-        docs = self.db.collection(self.collection_name)\
-                      .order_by("start_date", direction=self.db.Query.DESCENDING)\
-                      .limit(limit).stream()
-        return [doc.to_dict() for doc in docs]
-
-    # ==========================================
-    # 3. GESTIONE METRICHE CORPOREE (BILANCIA)
-    # ==========================================
-    def save_body_metrics(self, metrics_data):
+    def save_body_metrics(self, metrics_data: dict[str, Any]) -> bool:
         try:
             doc_id = metrics_data.get("data", "data_sconosciuta").replace(" ", "_").lower()
             doc_ref = self.db.collection("metrics").document(doc_id)
-            
-            # AGGIUNTA CRITICA: Inseriamo il timestamp del server per poter estrarre l'ultimo peso!
-            metrics_data["timestamp"] = firestore.SERVER_TIMESTAMP
-            
-            doc_ref.set(metrics_data)
-            print(f"✅ [DATABASE] Metriche salvate su Firestore con ID Doc: {doc_id}")
+
+            payload = {**metrics_data, "timestamp": firestore.SERVER_TIMESTAMP}
+            doc_ref.set(payload)
+            logger.info("✅ [DATABASE] Metriche salvate su Firestore con ID Doc: %s", doc_id)
             return True
         except Exception as e:
-            print(f"❌ [DATABASE] Errore durante il salvataggio su Firestore: {e}")
+            logger.error("❌ [DATABASE] Errore durante il salvataggio metriche: %s", e)
             return False
 
-    def get_latest_weight(self, return_full_dict=False):
-        """
-        Recupera l'ultima misurazione corporea.
-        Di default restituisce solo il peso in kg (float) per retrocompatibilità.
-        Se return_full_dict=True, restituisce l'intero dizionario con tutte le metriche.
-        """
+    def get_latest_weight(self, return_full_dict: bool = False) -> dict[str, Any] | float | None:
+        """Recupera l'ultima misurazione corporea (intero dict o solo float peso_kg)."""
         try:
-            doc_data = None
-            
-            # 1. Tentativo con ordine decrescente (funziona per i nuovi record salvati con il timestamp)
-            docs = self.db.collection("metrics").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(1).get()
-            for doc in docs:
-                doc_data = doc.to_dict()
-                break  # Trovato il primo, esce dal ciclo
-                
-            # 2. Fallback per i vecchi record (senza timestamp, estrae il primo disponibile)
+            docs = (
+                self.db.collection("metrics")
+                .order_by("timestamp", direction=firestore.Query.DESCENDING)
+                .limit(1)
+                .get()
+            )
+            doc_data = docs[0].to_dict() if docs else None
+
             if not doc_data:
                 docs_fallback = self.db.collection("metrics").limit(1).get()
-                for doc in docs_fallback:
-                    doc_data = doc.to_dict()
-                    break
+                doc_data = docs_fallback[0].to_dict() if docs_fallback else None
 
-            # 3. Restituzione del risultato in base al parametro richiesto
             if doc_data:
-                if return_full_dict:
-                    return doc_data  # Restituisce tutto: massa ossea, idrica, grassa, ecc.
-                else:
-                    return doc_data.get("peso_kg")  # Comportamento classico: restituisce solo il numero
-                    
+                return doc_data if return_full_dict else doc_data.get("peso_kg")
             return None
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nel recupero delle metriche corporee: {e}")
+            logger.error("❌ [DATABASE] Errore nel recupero delle metriche corporee: %s", e)
             return None
 
     # ==========================================
-    # 4. GESTIONE PIANIFICAZIONE SETTIMANALE
+    # 3. GESTIONE PIANIFICAZIONE SETTIMANALE
     # ==========================================
-    def get_current_week_id(self):
-        oggi = date.today()
-        anno, settimana, giorno_settimana = oggi.isocalendar()
+    @staticmethod
+    def get_current_week_id() -> str:
+        anno, settimana, _ = date.today().isocalendar()
         return f"{anno}_W{settimana}"
 
-    def save_weekly_plan_structured(self, sessions_list):
+    def save_weekly_plan_structured(self, sessions_list: list[dict[str, Any]]) -> bool:
         try:
             week_id = self.get_current_week_id()
             doc_ref = self.db.collection("training_plans").document(week_id)
-            
-            plan_data = {
+            doc_ref.set({
                 "week_id": week_id,
                 "last_modified": firestore.SERVER_TIMESTAMP,
                 "sessions": sessions_list
-            }
-            
-            doc_ref.set(plan_data)
+            })
             return True
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nel salvataggio del piano strutturato: {e}")
+            logger.error("❌ [DATABASE] Errore nel salvataggio del piano strutturato: %s", e)
             return False
 
-    def get_weekly_plan(self):
+    def get_weekly_plan(self) -> dict[str, Any] | None:
         try:
             week_id = self.get_current_week_id()
             doc = self.db.collection("training_plans").document(week_id).get()
-            if doc.exists:
-                return doc.to_dict()
-            return None
+            return doc.to_dict() if doc.exists else None
         except Exception as e:
-            print(f"❌ [DATABASE] Errore recupero piano: {e}")
+            logger.error("❌ [DATABASE] Errore recupero piano: %s", e)
             return None
 
-    # --- METODO PRIVATO UNIFICATO PER MODIFICARE LE SESSIONI (DRY PRINCIPLE) ---
-    def _update_session_action(self, session_id, action, nuovi_step=None):
-        """Motore centrale che esegue tutte le operazioni (done, reopen, edit, delete) su una sessione"""
+    def _update_session_action(
+        self,
+        session_id: int | str,
+        action: str,
+        nuovi_step: list[str] | None = None
+    ) -> bool:
+        """Motore centrale per aggiornare stato o contenuto di una sessione."""
         try:
             week_id = self.get_current_week_id()
             doc_ref = self.db.collection("training_plans").document(week_id)
             doc = doc_ref.get()
-            
+
             if not doc.exists:
                 return False
-                
+
             data = doc.to_dict()
-            sessioni = data.get("sessions", [])
+            sessioni: list[dict[str, Any]] = data.get("sessions", [])
+            target_id = str(session_id)
             aggiornato = False
-            
+
             if action == "delete":
-                # Filtra via la sessione da eliminare
-                sessioni_filtrate = [s for s in sessioni if str(s["id"]) != str(session_id)]
+                sessioni_filtrate = [s for s in sessioni if str(s.get("id")) != target_id]
                 if len(sessioni_filtrate) < len(sessioni):
                     data["sessions"] = sessioni_filtrate
                     aggiornato = True
             else:
-                # Modifica la sessione trovata
                 for s in sessioni:
-                    if str(s["id"]) == str(session_id):
+                    if str(s.get("id")) == target_id:
                         if action == "done":
                             s["status"] = "done"
                         elif action == "reopen":
                             s["status"] = "todo"
-                        elif action == "edit":
+                        elif action == "edit" and nuovi_step is not None:
                             s["status"] = "todo"
                             s["steps"] = nuovi_step
                         aggiornato = True
                         break
-            
+
             if aggiornato:
+                data["last_modified"] = firestore.SERVER_TIMESTAMP
                 doc_ref.set(data)
                 return True
             return False
         except Exception as e:
-            print(f"❌ [DATABASE] Errore nell'operazione '{action}' sulla sessione {session_id}: {e}")
+            logger.error("❌ [DATABASE] Errore nell'operazione '%s' sulla sessione %s: %s", action, session_id, e)
             return False
 
-    # --- LE 4 FUNZIONI PUBBLICHE DIVENTATE MONORIGA GRAZIE AL METODO UNIFICATO ---
-    
-    def mark_session_as_done(self, session_id):
+    def mark_session_as_done(self, session_id: int | str) -> bool:
         return self._update_session_action(session_id, action="done")
 
-    def reopen_session(self, session_id):
+    def reopen_session(self, session_id: int | str) -> bool:
         return self._update_session_action(session_id, action="reopen")
 
-    def edit_session(self, session_id, nuovi_step):
+    def edit_session(self, session_id: int | str, nuovi_step: list[str]) -> bool:
         return self._update_session_action(session_id, action="edit", nuovi_step=nuovi_step)
 
-    def delete_session(self, session_id):
+    def delete_session(self, session_id: int | str) -> bool:
         return self._update_session_action(session_id, action="delete")
 
-# Istanza pronta all'uso esportata come singleton
+
 db = RunningDB()
