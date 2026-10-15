@@ -83,14 +83,17 @@ class BotOrchestrator:
         """Dirotta i messaggi liberi alla chat arricchendola con il contesto di Firestore."""
         target_chat_id = chat_id or self.default_chat_id
         logger.info("💬 [ORCHESTRATOR] Raccolta contesto Omni-Agent per chat_id %s...", target_chat_id)
-        self.notifier.send_message("✍️ L'agente sta elaborando la risposta...")
+        self.notifier.send_message("✍️ L'agente sta elaborando la risposta...", chat_id=target_chat_id)
 
         try:
             context_string = self._build_omni_context()
             risposta_agente = self.analyst.chat_omni_agent(target_chat_id, testo, context_string)
 
             if not risposta_agente:
-                self.notifier.send_message("⚠️ Si è verificato un timeout nella generazione della risposta.")
+                self.notifier.send_message(
+                    "⚠️ Si è verificato un timeout nella generazione della risposta.",
+                    chat_id=target_chat_id
+                )
                 return
 
             risposta_pulita = risposta_agente.strip()
@@ -123,12 +126,22 @@ class BotOrchestrator:
 
                 risposta_pulita = RE_RUNALYZE_LINKS.sub("", risposta_pulita).strip()
 
-            self.notifier.send_message(risposta_pulita, reply_markup=tastiera_inline)
-            logger.info("🤖 [ORCHESTRATOR] Risposta inviata a Telegram con successo.")
+            inviato = self.notifier.send_message(
+                risposta_pulita,
+                reply_markup=tastiera_inline,
+                chat_id=target_chat_id
+            )
+            if inviato:
+                logger.info("🤖 [ORCHESTRATOR] Risposta inviata a Telegram con successo (chat_id=%s).", target_chat_id)
+            else:
+                logger.error("❌ [ORCHESTRATOR] Fallito invio risposta a Telegram (chat_id=%s).", target_chat_id)
 
         except Exception as e:
             logger.exception("💥 [ORCHESTRATOR] Errore nella gestione della chat AI: %s", e)
-            self.notifier.send_message("❌ Si è verificato un errore durante l'interazione con l'Agente.")
+            self.notifier.send_message(
+                "❌ Si è verificato un errore durante l'interazione con l'Agente.",
+                chat_id=target_chat_id
+            )
 
     def handle_sync_incrementale(self) -> None:
         """Deprecato: le corse sono lette in tempo reale via MCP."""
