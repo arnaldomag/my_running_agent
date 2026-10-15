@@ -231,4 +231,16 @@ def telegram_webhook():
 @app.route("/tasks/weekly-report", methods=["POST"])
 def tasks_weekly_report():
     try:
-        logger.info("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler
+        logger.info("⏰ [CRON] Chiamata temporizzata ricevuta da Cloud Scheduler!")
+        mio_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or config.get_secret("TELEGRAM_CHAT_ID")
+        orchestrator.process_cron_weekly_report(mio_chat_id)
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logger.exception("❌ [CRON] Errore durante l'esecuzione del cron job: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
