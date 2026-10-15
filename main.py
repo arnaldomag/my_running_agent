@@ -1,41 +1,53 @@
+import logging
+import sys
+import time
 from app.config import config
 from app.database import db
-import sys
 
-def run_health_check():
-    print("\n--- 🔍 AVVIO HEALTH CHECK AGENTE ---")
-    
-    print("1. Controllo Segreti...")
+# Configurazione logging standard (ottimale per Cloud Run / stdout)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
+
+
+def run_health_check() -> bool:
+    start_time = time.perf_counter()
+    logger.info("🔍 Avvio Health Check Agente...")
+
+    # 1. Controllo Segreti
     tg_token = config.get_secret("TELEGRAM_TOKEN")
-    if tg_token:
-        print(f"   ✅ Segreto TELEGRAM_TOKEN recuperato: {tg_token[:5]}***")
-    else:
-        print("   ❌ Errore: Impossibile recuperare TELEGRAM_TOKEN.")
+    if not tg_token:
+        logger.error("❌ Impossibile recuperare TELEGRAM_TOKEN.")
         return False
+    logger.info("✅ Segreto TELEGRAM_TOKEN recuperato (%s***)", tg_token[:5])
 
-    print("2. Controllo Connessione Firestore (Dati Biometrici/Piani)...")
+    # 2. Controllo Connessione Firestore
     try:
-        if db.run_test_write():
-            print("   ✅ Scrittura Firestore riuscita.")
+        if not db.run_test_write():
+            logger.error("❌ Scrittura di test su Firestore fallita.")
+            return False
+        logger.info("✅ Connessione e scrittura Firestore riuscita.")
     except Exception as e:
-        print(f"   ❌ Errore Firestore: {e}")
+        logger.exception("❌ Errore durante il test Firestore: %s", e)
         return False
 
-    print("--- ✨ TUTTI I SISTEMI SONO OPERATIVI ---\n")
+    elapsed = (time.perf_counter() - start_time) * 1000
+    logger.info("✨ Tutti i sistemi sono operativi (Health Check completato in %.1f ms)", elapsed)
     return True
 
-def main():
-    try:
-        # 1. Health Check
-        if not run_health_check():
-            sys.exit(1)
-            
-        print(f"🚀 Avvio in modalità {'CLOUD' if getattr(config, 'is_cloud', False) else 'LOCALE'}")
-        print("💡 Nota: I dati atletici sono ora gestiti in tempo reale via Runalyze MCP.")
-        print("💡 Esegui 'python webhook.py' per avviare il server in ascolto per Telegram.")
 
-    except Exception as e:
-        print(f"❌ Errore critico: {e}")
+def main() -> None:
+    if not run_health_check():
+        sys.exit(1)
+
+    env_mode = "CLOUD" if getattr(config, "is_cloud", False) else "LOCALE"
+    logger.info("🚀 Avvio in modalità %s", env_mode)
+    logger.info("💡 Dati atletici gestiti in tempo reale via Runalyze MCP.")
+    logger.info("💡 Esegui Gunicorn o 'python webhook.py' per avviare il server in ascolto.")
+
 
 if __name__ == "__main__":
     main()
