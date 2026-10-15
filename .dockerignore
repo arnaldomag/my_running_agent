@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+scripts/
+genera_readme.py
+README.md
+LICENSE
