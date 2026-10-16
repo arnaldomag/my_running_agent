@@ -91,7 +91,11 @@ class RunningAnalyst:
 
         except Exception as e:
             logger.exception("💥 [CRITICAL] Errore durante l'esecuzione dell'Omni-Agent MCP: %s", e)
-            return "C'è stata un'anomalia di connessione con Runalyze. Dammi un minuto e riproviamo."
+            err_str = str(e)
+            if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
+                return "⏳ I server di Google Gemini sono momentaneamente sovraccarichi (Errore 503). Riprova tra qualche secondo!"
+            return "⚠️ C'è stata un'anomalia di connessione con il server MCP di Runalyze. Riprova tra un minuto."
+
 
     def extract_body_metrics_from_image(self, image_bytes: bytes) -> dict[str, Any] | None:
         """
