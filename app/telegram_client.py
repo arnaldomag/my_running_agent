@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 import requests
@@ -7,10 +8,58 @@ from .config import config
 
 logger = logging.getLogger(__name__)
 
+# Regex pre-compilate per sanificare l'HTML di Telegram in < 0.1 ms
+RE_BR_TAGS = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
+RE_P_CLOSE = re.compile(r"<\s*/\s*p\s*>", re.IGNORECASE)
+RE_LI_OPEN = re.compile(r"<\s*li\s*>", re.IGNORECASE)
+# Cattura i tag supportati ufficialmente da Telegram per proteggerli dall'escape
+RE_VALID_TG_TAGS = re.compile(
+    r"(</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler)\b[^>]*>|"
+    r"<a\s+href=[\"'][^\"']+[\"']\s*>|</a>)",
+    re.IGNORECASE
+)
+RE_ALL_HTML_TAGS = re.compile(r"<[^>]+>")
+
+
+def sanitize_telegram_html(text: str) -> str:
+    """
+    Rende il testo generato dall'LLM 100% compatibile con il parser HTML di Telegram:
+    1. Sostituisce <br>, </p>, <li> con a capo/elenchi testuali.
+    2. Fa l'escape di '<', '>' e '&' (es. 'passo < 4:30') preservando solo i tag Telegram validi.
+    """
+    # 1. Normalizza tag di blocco comuni che Gemini potrebbe inserire per errore
+    text = RE_BR_TAGS.sub("\n", text)
+    text = RE_P_CLOSE.sub("\n\n", text)
+    text = RE_LI_OPEN.sub("- ", text)
+
+    # 2. Divide la stringa isolando i tag Telegram validi dal resto del testo
+    parts = RE_VALID_TG_TAGS.split(text)
+    sanitized_parts = []
+
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            # È un tag Telegram valido (es. <b>, </i>, <a href="...">): lo manteniamo intatto
+            sanitized_parts.append(part)
+        else:
+            # È testo normale (o contiene tag HTML non supportati come <ul>, <h3> o simboli '< 4:30'):
+            # rimuoviamo eventuali tag strutturali residui come <p>, <ul>, <li>, <h3>
+            cleaned = re.sub(r"</?(?:p|ul|ol|li|h[1-6]|div|span|html|body)\b[^>]*>", "", part, flags=re.IGNORECASE)
+            # Facciamo l'escape di &, < e > liberi nel testo
+            cleaned = cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            sanitized_parts.append(cleaned)
+
+    return "".join(sanitized_parts)
+
+
+def strip_html_tags(text: str) -> str:
+    """Rimuove tutti i tag HTML nel caso estremo in cui serva il fallback plain-text."""
+    clean = RE_ALL_HTML_TAGS.sub("", text)
+    return clean.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
 
 class TelegramNotifier:
     DEFAULT_TIMEOUT = 10
-    MAX_MESSAGE_LENGTH = 4000  # Limite Telegram è 4096, teniamo margine di sicurezza
+    MAX_MESSAGE_LENGTH = 4000
 
     def __init__(self):
         self.token = config.get_secret("TELEGRAM_TOKEN")
@@ -27,35 +76,42 @@ class TelegramNotifier:
         reply_markup: dict[str, Any] | None = None
     ) -> bool:
         url = f"{self.base_url}/sendMessage"
+        safe_html_text = sanitize_telegram_html(text_chunk)
+
         payload: dict[str, Any] = {
             "chat_id": target_chat_id,
-            "text": text_chunk,
+            "text": safe_html_text,
             "parse_mode": "HTML"
         }
         if reply_markup:
             payload["reply_markup"] = reply_markup
 
         try:
-            # 1. Tentativo standard con HTML e bottoni
+            # 1. Tentativo standard con HTML sanificato
             response = self.session.post(url, json=payload, timeout=self.DEFAULT_TIMEOUT)
             if response.ok:
                 return True
 
-            # 2. Se errore 400 (es. tag HTML non chiusi da Gemini), riprova senza HTML
+            # 2. Se c'è ancora un errore 400 (es. tag <b> aperto e mai chiuso a metà blocco),
+            # inviamo in plain-text PULITO (senza mostrare <b> o <i> in chiaro!)
             if response.status_code == 400:
                 logger.warning(
-                    "⚠️ [TELEGRAM] Rifiuto 400 (%s). Riprovo senza parse_mode HTML...",
+                    "⚠️ [TELEGRAM] Rifiuto 400 (%s). Invio fallback plain-text pulito...",
                     response.text
                 )
                 payload.pop("parse_mode", None)
+                payload["text"] = strip_html_tags(safe_html_text)
+
                 fallback_resp = self.session.post(url, json=payload, timeout=self.DEFAULT_TIMEOUT)
                 if fallback_resp.ok:
                     return True
 
-                # 3. Se fallisce ancora (es. reply_markup malformato), invia almeno il testo puro
+                # 3. Se il 400 dipende da reply_markup malformato, rimuoviamo i bottoni ma teniamo l'HTML!
                 if reply_markup:
-                    logger.warning("⚠️ [TELEGRAM] Riprovo rimuovendo anche reply_markup...")
+                    logger.warning("⚠️ [TELEGRAM] Riprovo rimuovendo reply_markup ma mantenendo HTML...")
                     payload.pop("reply_markup", None)
+                    payload["text"] = safe_html_text
+                    payload["parse_mode"] = "HTML"
                     last_resp = self.session.post(url, json=payload, timeout=self.DEFAULT_TIMEOUT)
                     if last_resp.ok:
                         return True
@@ -85,11 +141,9 @@ class TelegramNotifier:
             logger.warning("⚠️ [TELEGRAM] Tentativo di inviare un messaggio vuoto. Ignorato.")
             return False
 
-        # Se il messaggio sta in un solo blocco (< 4000 chars), invio diretto
         if len(text) <= self.MAX_MESSAGE_LENGTH:
             return self._post_single_chunk(target_chat_id, text, reply_markup)
 
-        # Altrimenti spezziamo il messaggio per paragrafi per non rompere il limite di 4096 chars
         logger.info("✂️ [TELEGRAM] Messaggio lungo (%d chars), suddivisione in blocchi...", len(text))
         chunks = []
         current = ""
@@ -108,7 +162,6 @@ class TelegramNotifier:
 
         success = True
         for i, chunk in enumerate(chunks):
-            # Attacchiamo i bottoni solo all'ultimo blocco del messaggio
             markup = reply_markup if (i == len(chunks) - 1) else None
             if not self._post_single_chunk(target_chat_id, chunk, markup):
                 success = False
