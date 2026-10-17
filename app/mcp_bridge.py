@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from typing import Any
 
 import google.genai.types as types
@@ -10,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 class RunalyzeMCPBridge:
     MAX_TOOL_OUTPUT_CHARS = 15000
-    MAX_AGENT_TURNS = 6  # Previene loop infiniti di tool-calling
+    MAX_AGENT_TURNS = 6
+    # Modelli usati SOLO come paracadute d'emergenza se gemini-3.5-flash dà 503 persistente
+    EMERGENCY_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
 
     def __init__(self, token: str, gemini_client: Any, model_id: str = "gemini-3.5-flash"):
         self.url = "https://runalyze.com/mcp"
@@ -26,17 +29,57 @@ class RunalyzeMCPBridge:
             "Content-Type": "application/json"
         }
 
-        # Client HTTP persistente (Connection Pooling Keep-Alive)
         self._http_client = httpx.Client(
             headers=self.base_headers,
             timeout=httpx.Timeout(30.0, connect=10.0),
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
         )
 
-        # Cache per Session ID e catalogo Tools Gemini (evita 2 round-trip HTTP per messaggio)
         self._session_id: str | None = None
         self._cached_gemini_tools: list[types.Tool] | None = None
         self._lock = threading.Lock()
+
+    def _generate_resilient(
+        self,
+        contents: list[Any],
+        config: types.GenerateContentConfig
+    ) -> Any:
+        """
+        Usa prioritariamente self.model_id (gemini-3.5-flash) con 2 tentativi diretti.
+        Solo se i server di gemini-3.5-flash sono completamente fermi (503 persistente),
+        usa un modello di emergenza per non far fallire il messaggio su Telegram.
+        """
+        # Sequenza: 2 tentativi sul tuo modello primario, poi paracadute d'emergenza
+        attempt_sequence = [self.model_id, self.model_id] + [
+            m for m in self.EMERGENCY_FALLBACK_MODELS if m != self.model_id
+        ]
+        last_exception = None
+
+        for idx, target_model in enumerate(attempt_sequence):
+            try:
+                if idx == 1:
+                    logger.info("⏳ [MCP-HTTP] Secondo tentativo su %s dopo picco 503...", target_model)
+                elif idx > 1:
+                    logger.warning("🔄 [MCP-HTTP] %s ancora in 503: uso fallback temporaneo %s", self.model_id, target_model)
+
+                return self.gemini_client.models.generate_content(
+                    model=target_model,
+                    contents=contents,
+                    config=config
+                )
+            except Exception as err:
+                last_exception = err
+                err_str = str(err).upper()
+                if any(code in err_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500")):
+                    logger.warning(
+                        "⚠️ [MCP-HTTP] Tentativo %d fallito su '%s' (503/429). Attesa breve...",
+                        idx + 1, target_model
+                    )
+                    time.sleep(1.5 if idx == 0 else 0.5)
+                    continue
+                raise
+
+        raise last_exception
 
     def _init_session_and_tools(self, force_refresh: bool = False) -> tuple[str, list[types.Tool] | None]:
         """Negozia la sessione MCP e mette in cache la mappatura dei tool Gemini."""
@@ -44,7 +87,6 @@ class RunalyzeMCPBridge:
             if not force_refresh and self._session_id and self._cached_gemini_tools is not None:
                 return self._session_id, self._cached_gemini_tools
 
-            # 1. Handshake iniziale
             init_payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -63,7 +105,6 @@ class RunalyzeMCPBridge:
 
             self._session_id = session_id
 
-            # 2. Scarica e mappa i tool solo se non sono già in cache
             if self._cached_gemini_tools is None or force_refresh:
                 tools_payload = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
                 tools_resp = self._http_client.post(
@@ -125,7 +166,6 @@ class RunalyzeMCPBridge:
             headers={"Mcp-Session-Id": session_id}
         )
 
-        # Se la sessione MCP su Runalyze è scaduta, rinegozia una sola volta in modo trasparente
         if resp.status_code in (400, 401, 403, 404):
             logger.info("🔄 [MCP-HTTP] Sessione MCP scaduta, rinegoziazione in corso...")
             session_id, _ = self._init_session_and_tools(force_refresh=True)
@@ -154,7 +194,7 @@ class RunalyzeMCPBridge:
         return session_id, tool_result_text
 
     def execute_agent_loop(self, contents: list[Any], system_instruction: str) -> str:
-        """Esegue il loop agente riutilizzando sessione e tool cachati."""
+        """Esegue il loop agente mantenendo il modello configurato e gestendo i picchi 503."""
         session_id, gemini_tools = self._init_session_and_tools()
 
         gen_config = types.GenerateContentConfig(
@@ -163,12 +203,8 @@ class RunalyzeMCPBridge:
             tools=gemini_tools
         )
 
-        logger.info("🧠 [MCP-HTTP] Invio contesto iniziale a Gemini...")
-        response = self.gemini_client.models.generate_content(
-            model=self.model_id,
-            contents=contents,
-            config=gen_config
-        )
+        logger.info("🧠 [MCP-HTTP] Invio contesto iniziale a Gemini (%s)...", self.model_id)
+        response = self._generate_resilient(contents=contents, config=gen_config)
 
         turn_count = 0
         while response.function_calls and turn_count < self.MAX_AGENT_TURNS:
@@ -187,15 +223,10 @@ class RunalyzeMCPBridge:
                     )
                 )
 
-            # NOTA CRITICA SDK GEMINI: Le risposte delle funzioni richiedono role="user" (non "tool")
             contents.append(types.Content(role="user", parts=tool_parts))
 
             logger.info("🧠 [MCP-HTTP] Invio dati estratti a Gemini (Turno %d)...", turn_count)
-            response = self.gemini_client.models.generate_content(
-                model=self.model_id,
-                contents=contents,
-                config=gen_config
-            )
+            response = self._generate_resilient(contents=contents, config=gen_config)
 
         logger.info("🎯 [MCP-HTTP] Elaborazione completata in %d turni tool.", turn_count)
         return response.text
