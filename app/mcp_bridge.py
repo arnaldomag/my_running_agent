@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 class RunalyzeMCPBridge:
     MAX_TOOL_OUTPUT_CHARS = 15000
     MAX_AGENT_TURNS = 6
-    # Solo modelli verificati: rimosso gemini-3.5-pro (404)
-    EMERGENCY_FALLBACK_MODELS = ("gemini-3.8-flash",)
+    MAX_DESC_LEN = 160  # Limita la lunghezza delle descrizioni schema per evitare 503 sul compilatore tool
 
     def __init__(self, token: str, gemini_client: Any, model_id: str = "gemini-3.5-flash"):
         self.url = "https://runalyze.com/mcp"
@@ -37,7 +36,39 @@ class RunalyzeMCPBridge:
 
         self._session_id: str | None = None
         self._cached_gemini_tools: list[types.Tool] | None = None
+        self._discovered_fallbacks: list[str] | None = None
         self._lock = threading.Lock()
+
+    def _get_available_fallback_models(self) -> list[str]:
+        """
+        Interroga dinamicamente l'API di Google (una sola volta) per scoprire quali modelli
+        sono realmente attivi sulla chiave dell'utente, evitando qualsiasi errore 404.
+        """
+        if self._discovered_fallbacks is not None:
+            return self._discovered_fallbacks
+
+        fallbacks = []
+        try:
+            for m in self.gemini_client.models.list():
+                name = (m.name or "").removeprefix("models/")
+                actions = m.supported_actions or []
+                if (
+                    "generateContent" in actions
+                    and "gemini" in name
+                    and name != self.model_id
+                    and not any(x in name for x in ("embedding", "vision", "imagen", "tts", "audio", "1.5"))
+                ):
+                    fallbacks.append(name)
+
+            # Ordiniamo dando priorità ai modelli 'lite' e 'flash' (più veloci e meno soggetti a 503)
+            fallbacks.sort(key=lambda x: (0 if "lite" in x else (1 if "flash" in x else 2), x), reverse=False)
+            logger.info("🔍 [MCP-Bridge] Modelli di fallback scoperti dinamicamente: %s", fallbacks[:4])
+        except Exception as e:
+            logger.warning("⚠️ [MCP-Bridge] Impossibile elencare i modelli dinamicamente: %s", e)
+            fallbacks = ["gemini-3.8-flash"]
+
+        self._discovered_fallbacks = fallbacks[:4]
+        return self._discovered_fallbacks
 
     def _generate_resilient(
         self,
@@ -46,31 +77,31 @@ class RunalyzeMCPBridge:
         preferred_model: str | None = None
     ) -> tuple[Any, str]:
         """
-        Restituisce (response, active_model_used).
-        Se in un turno multi-tool è già stato agganciato un modello funzionante (preferred_model),
-        continua a usare quello per mantenere la coerenza della thought_signature ed evitare
-        nuovi timeout 503 a metà analisi.
+        Tenta sul modello primario (gemini-3.5-flash) disabilitando i retry lenti di tenacity,
+        e in caso di 503 scala sui modelli attivi scoperti dinamicamente sull'account.
         """
         start_model = preferred_model or self.model_id
-        # 2 tentativi sul modello attivo, poi eventuale fallback su gemini-3.8-flash (con 2 tentativi)
-        attempt_sequence = [start_model, start_model]
-        for fb in self.EMERGENCY_FALLBACK_MODELS:
-            if fb != start_model:
-                attempt_sequence.extend([fb, fb])
+        dynamic_fallbacks = self._get_available_fallback_models()
 
+        attempt_sequence = [start_model] + [m for m in dynamic_fallbacks if m != start_model]
         last_exception = None
+
+        # Riduciamo a 2 i tentativi interni di tenacity per non bloccare il thread per 30s su un singolo 503
+        fast_config = config.model_copy(
+            update={"http_options": types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=2))}
+        )
 
         for idx, target_model in enumerate(attempt_sequence):
             try:
                 if idx > 0:
                     logger.warning(
-                        "🔄 [MCP-HTTP] Tentativo %d/%d su modello '%s'...",
-                        idx + 1, len(attempt_sequence), target_model
+                        "🔄 [MCP-HTTP] Switch su modello attivo '%s' (tentativo %d/%d)...",
+                        target_model, idx + 1, len(attempt_sequence)
                     )
                 resp = self.gemini_client.models.generate_content(
                     model=target_model,
                     contents=contents,
-                    config=config
+                    config=fast_config
                 )
                 return resp, target_model
 
@@ -79,17 +110,17 @@ class RunalyzeMCPBridge:
                 err_str = str(err).upper()
                 if any(code in err_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "404", "NOT_FOUND")):
                     logger.warning(
-                        "⚠️ [MCP-HTTP] Modello '%s' temporaneamente indisponibile (%s). Riprovo...",
+                        "⚠️ [MCP-HTTP] Modello '%s' ha restituito %s. Passo al successivo...",
                         target_model, err
                     )
-                    time.sleep(1.5)
+                    time.sleep(1.0)
                     continue
                 raise
 
         raise last_exception
 
     def _init_session_and_tools(self, force_refresh: bool = False) -> tuple[str, list[types.Tool] | None]:
-        """Negozia la sessione MCP e mette in cache la mappatura dei tool Gemini."""
+        """Negozia la sessione MCP e mette in cache la mappatura snellita dei tool Gemini."""
         with self._lock:
             if not force_refresh and self._session_id and self._cached_gemini_tools is not None:
                 return self._session_id, self._cached_gemini_tools
@@ -122,13 +153,21 @@ class RunalyzeMCPBridge:
                 tools_resp.raise_for_status()
                 mcp_tools = tools_resp.json().get("result", {}).get("tools", [])
                 self._cached_gemini_tools = self._map_mcp_to_gemini(mcp_tools)
-                logger.info("🧰 [MCP-Bridge] %d tool MCP caricati e salvati in cache.", len(mcp_tools))
+                logger.info("🧰 [MCP-Bridge] %d tool MCP caricati, snelliti e salvati in cache.", len(mcp_tools))
 
             return self._session_id, self._cached_gemini_tools
 
-    @staticmethod
-    def _map_mcp_to_gemini(mcp_tools_list: list[dict[str, Any]]) -> list[types.Tool] | None:
-        """Mappa il catalogo JSON di Runalyze nei Tools dell'SDK Gemini."""
+    @classmethod
+    def _short_desc(cls, text: str | None) -> str:
+        """Accorcia le descrizioni JSON dello schema per alleggerire il payload dei tool."""
+        if not text:
+            return ""
+        clean = " ".join(text.split())
+        return clean[:cls.MAX_DESC_LEN] if len(clean) > cls.MAX_DESC_LEN else clean
+
+    @classmethod
+    def _map_mcp_to_gemini(cls, mcp_tools_list: list[dict[str, Any]]) -> list[types.Tool] | None:
+        """Mappa e snellisce il catalogo JSON di Runalyze nei Tools dell'SDK Gemini."""
         gemini_funcs = []
         for t in mcp_tools_list:
             props = {}
@@ -138,7 +177,7 @@ class RunalyzeMCPBridge:
                 schema_type = p_val.get("type", "string").upper()
                 schema_args: dict[str, Any] = {
                     "type": schema_type,
-                    "description": p_val.get("description", "")
+                    "description": cls._short_desc(p_val.get("description", ""))
                 }
 
                 if schema_type == "ARRAY" and "items" in p_val:
@@ -149,7 +188,7 @@ class RunalyzeMCPBridge:
 
             gemini_funcs.append(types.FunctionDeclaration(
                 name=t.get("name"),
-                description=t.get("description", ""),
+                description=cls._short_desc(t.get("description", "")),
                 parameters=types.Schema(
                     type="OBJECT",
                     properties=props,
@@ -211,8 +250,6 @@ class RunalyzeMCPBridge:
         )
 
         logger.info("🧠 [MCP-HTTP] Invio contesto iniziale a Gemini (%s)...", self.model_id)
-        # Se gemini-3.5-flash risponde, active_model sarà 'gemini-3.5-flash'.
-        # Se era in 503 ed è subentrato 'gemini-3.8-flash', active_model rimarrà 'gemini-3.8-flash' per il resto del loop!
         response, active_model = self._generate_resilient(
             contents=contents,
             config=gen_config,
