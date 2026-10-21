@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 class RunalyzeMCPBridge:
     MAX_TOOL_OUTPUT_CHARS = 15000
     MAX_AGENT_TURNS = 6
-    # Modelli usati SOLO come paracadute d'emergenza se gemini-3.5-flash dà 503 persistente
-    EMERGENCY_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
+    # Modelli aggiornati usati come paracadute se gemini-3.5-flash dà 503
+    EMERGENCY_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.5-pro")
 
     def __init__(self, token: str, gemini_client: Any, model_id: str = "gemini-3.5-flash"):
         self.url = "https://runalyze.com/mcp"
@@ -70,12 +70,12 @@ class RunalyzeMCPBridge:
             except Exception as err:
                 last_exception = err
                 err_str = str(err).upper()
-                if any(code in err_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500")):
+                if any(code in err_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "404", "NOT_FOUND")):
                     logger.warning(
-                        "⚠️ [MCP-HTTP] Tentativo %d fallito su '%s' (503/429). Attesa breve...",
-                        idx + 1, target_model
+                        "⚠️ [MCP-HTTP] Tentativo %d fallito su '%s' (%s). Passo al successivo...",
+                        idx + 1, target_model, err
                     )
-                    time.sleep(1.5 if idx == 0 else 0.5)
+                    time.sleep(1.0 if idx == 0 else 0.3)
                     continue
                 raise
 
