@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 class RunalyzeMCPBridge:
     MAX_TOOL_OUTPUT_CHARS = 15000
     MAX_AGENT_TURNS = 6
-    # Modelli aggiornati usati come paracadute se gemini-3.5-flash dà 503
-    EMERGENCY_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.5-pro")
+    # Solo modelli verificati: rimosso gemini-3.5-pro (404)
+    EMERGENCY_FALLBACK_MODELS = ("gemini-3.8-flash",)
 
     def __init__(self, token: str, gemini_client: Any, model_id: str = "gemini-3.5-flash"):
         self.url = "https://runalyze.com/mcp"
@@ -42,40 +42,47 @@ class RunalyzeMCPBridge:
     def _generate_resilient(
         self,
         contents: list[Any],
-        config: types.GenerateContentConfig
-    ) -> Any:
+        config: types.GenerateContentConfig,
+        preferred_model: str | None = None
+    ) -> tuple[Any, str]:
         """
-        Usa prioritariamente self.model_id (gemini-3.5-flash) con 2 tentativi diretti.
-        Solo se i server di gemini-3.5-flash sono completamente fermi (503 persistente),
-        usa un modello di emergenza per non far fallire il messaggio su Telegram.
+        Restituisce (response, active_model_used).
+        Se in un turno multi-tool è già stato agganciato un modello funzionante (preferred_model),
+        continua a usare quello per mantenere la coerenza della thought_signature ed evitare
+        nuovi timeout 503 a metà analisi.
         """
-        # Sequenza: 2 tentativi sul tuo modello primario, poi paracadute d'emergenza
-        attempt_sequence = [self.model_id, self.model_id] + [
-            m for m in self.EMERGENCY_FALLBACK_MODELS if m != self.model_id
-        ]
+        start_model = preferred_model or self.model_id
+        # 2 tentativi sul modello attivo, poi eventuale fallback su gemini-3.8-flash (con 2 tentativi)
+        attempt_sequence = [start_model, start_model]
+        for fb in self.EMERGENCY_FALLBACK_MODELS:
+            if fb != start_model:
+                attempt_sequence.extend([fb, fb])
+
         last_exception = None
 
         for idx, target_model in enumerate(attempt_sequence):
             try:
-                if idx == 1:
-                    logger.info("⏳ [MCP-HTTP] Secondo tentativo su %s dopo picco 503...", target_model)
-                elif idx > 1:
-                    logger.warning("🔄 [MCP-HTTP] %s ancora in 503: uso fallback temporaneo %s", self.model_id, target_model)
-
-                return self.gemini_client.models.generate_content(
+                if idx > 0:
+                    logger.warning(
+                        "🔄 [MCP-HTTP] Tentativo %d/%d su modello '%s'...",
+                        idx + 1, len(attempt_sequence), target_model
+                    )
+                resp = self.gemini_client.models.generate_content(
                     model=target_model,
                     contents=contents,
                     config=config
                 )
+                return resp, target_model
+
             except Exception as err:
                 last_exception = err
                 err_str = str(err).upper()
                 if any(code in err_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "404", "NOT_FOUND")):
                     logger.warning(
-                        "⚠️ [MCP-HTTP] Tentativo %d fallito su '%s' (%s). Passo al successivo...",
-                        idx + 1, target_model, err
+                        "⚠️ [MCP-HTTP] Modello '%s' temporaneamente indisponibile (%s). Riprovo...",
+                        target_model, err
                     )
-                    time.sleep(1.0 if idx == 0 else 0.3)
+                    time.sleep(1.5)
                     continue
                 raise
 
@@ -194,7 +201,7 @@ class RunalyzeMCPBridge:
         return session_id, tool_result_text
 
     def execute_agent_loop(self, contents: list[Any], system_instruction: str) -> str:
-        """Esegue il loop agente mantenendo il modello configurato e gestendo i picchi 503."""
+        """Esegue il loop agente mantenendo lo stesso modello funzionante per tutti i turni del tool."""
         session_id, gemini_tools = self._init_session_and_tools()
 
         gen_config = types.GenerateContentConfig(
@@ -204,7 +211,13 @@ class RunalyzeMCPBridge:
         )
 
         logger.info("🧠 [MCP-HTTP] Invio contesto iniziale a Gemini (%s)...", self.model_id)
-        response = self._generate_resilient(contents=contents, config=gen_config)
+        # Se gemini-3.5-flash risponde, active_model sarà 'gemini-3.5-flash'.
+        # Se era in 503 ed è subentrato 'gemini-3.8-flash', active_model rimarrà 'gemini-3.8-flash' per il resto del loop!
+        response, active_model = self._generate_resilient(
+            contents=contents,
+            config=gen_config,
+            preferred_model=self.model_id
+        )
 
         turn_count = 0
         while response.function_calls and turn_count < self.MAX_AGENT_TURNS:
@@ -225,8 +238,12 @@ class RunalyzeMCPBridge:
 
             contents.append(types.Content(role="user", parts=tool_parts))
 
-            logger.info("🧠 [MCP-HTTP] Invio dati estratti a Gemini (Turno %d)...", turn_count)
-            response = self._generate_resilient(contents=contents, config=gen_config)
+            logger.info("🧠 [MCP-HTTP] Invio dati estratti a Gemini (Turno %d su %s)...", turn_count, active_model)
+            response, active_model = self._generate_resilient(
+                contents=contents,
+                config=gen_config,
+                preferred_model=active_model
+            )
 
-        logger.info("🎯 [MCP-HTTP] Elaborazione completata in %d turni tool.", turn_count)
+        logger.info("🎯 [MCP-HTTP] Elaborazione completata in %d turni tool con %s.", turn_count, active_model)
         return response.text
